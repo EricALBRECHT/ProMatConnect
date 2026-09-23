@@ -16,7 +16,7 @@
       <a class="brand" href="/" aria-label="ProMatConnect, accueil"
         ><span class="logo" aria-hidden="true">P<span>+</span></span
         >ProMat<span>Connect</span></a
-      ><span class="demo">MVP 0.1 · Simulation</span>
+      ><span class="demo">MVP 0.2 · Simulation</span>
     </header>
     <main>
       <section class="intro">
@@ -43,15 +43,79 @@
           ></span>
           <div>
             <strong>Votre point de départ</strong>
-            <p>Position fictive · {{ latitude }}, {{ longitude }}</p>
-            <small>Distances à vol d’oiseau, hors trajet routier.</small>
+            <p>Un départ, plusieurs possibilités</p>
+            <small>Comparez votre tournée aller-retour.</small>
           </div>
         </aside>
       </section>
       <div class="notice">
         <span aria-hidden="true">i</span> Mode démonstration : fournisseurs,
-        agences, prix et stocks fictifs. Aucune commande réelle.
+        agences, prix, stocks et trajets simulés. Aucune commande réelle.
       </div>
+      <section class="origin-panel" aria-labelledby="origin-title">
+        <div class="section-heading">
+          <h2 id="origin-title">Point de départ</h2>
+          <span class="muted">Retour à ce point inclus</span>
+        </div>
+        <fieldset class="origin-choices">
+          <legend class="sr-only">Choisir le point de départ</legend>
+          <label
+            ><input type="radio" name="origin-type" value="site" checked />
+            Chantier</label
+          >
+          <label
+            ><input type="radio" name="origin-type" value="current_location" />
+            Ma position</label
+          >
+          <label
+            ><input type="radio" name="origin-type" value="company" />
+            Entreprise</label
+          >
+          <label
+            ><input type="radio" name="origin-type" value="other" /> Autre
+            adresse</label
+          >
+        </fieldset>
+        <div class="origin-fields">
+          <div id="address-field">
+            <label id="address-label" for="origin-address"
+              >Adresse du chantier</label
+            >
+            <input
+              id="origin-address"
+              list="demo-addresses"
+              value="{{ site_address }}"
+              maxlength="300"
+              minlength="3"
+              required
+              autocomplete="street-address"
+            />
+            <datalist id="demo-addresses">
+              {% for address in demo_addresses %}
+              <option value="{{ address }}"></option>
+              {% endfor %}
+            </datalist>
+            <small
+              >Géocodage simulé : choisissez une adresse de démonstration dans
+              les suggestions.</small
+            >
+          </div>
+          <p id="company-origin" hidden>
+            <strong>Adresse de l’entreprise</strong><br />{{ company_address }}
+          </p>
+          <div id="position-origin" hidden>
+            <p id="position-status" role="status" aria-live="polite">
+              La position sera demandée uniquement à votre initiative.
+            </p>
+            <button id="locate" type="button" class="text-button">
+              Autoriser / actualiser ma position</button
+            ><small
+              >Les coordonnées servent à cette comparaison et ne sont pas
+              conservées.</small
+            >
+          </div>
+        </div>
+      </section>
       <section class="workspace" aria-labelledby="cart-title">
         <div class="section-heading">
           <h2 id="cart-title">Votre liste de matériaux</h2>
@@ -123,12 +187,18 @@
           </div>
           <span class="muted">Prix simulés · EUR HT</span>
         </div>
+        <div id="decision-summary" class="decision-summary" hidden></div>
         <div id="results" class="results"></div>
+        <details class="legacy-results">
+          <summary>Retrouver la comparaison par enseigne (V0.1)</summary>
+          <div id="legacy-results"></div>
+        </details>
         <p class="footnote">
-          Chaque ligne est retirée intégralement dans une agence. L’optimisation
-          porte sur le prix des matériaux, sans frais de déplacement. Le délai
-          affiché est le maximum des préparations, hors trajet. Une même
-          enseigne peut nécessiter plusieurs arrêts.
+          Prix des matériaux en € HT. Le coût estimé d’approvisionnement est un
+          indicateur d’aide au choix, jamais un prix facturé. La préparation
+          maximale est attendue avant le départ, puis le trajet aller-retour est
+          effectué : ces temps sont additionnés. Les distances et durées
+          routières sont simulées, sans trafic ni navigation réelle.
         </p>
       </section>
     </main>

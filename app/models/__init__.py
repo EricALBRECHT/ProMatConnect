@@ -98,3 +98,8 @@ class Offer(Timestamps, Base):
     price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     stock: Mapped[int] = mapped_column(Integer)  # Conditionnements entiers.
     preparation_minutes: Mapped[int] = mapped_column(Integer)
+
+
+# Imports après Product/Timestamps : enregistrent les tables additionnelles dans Base.metadata.
+from app.models.chantier import Chantier as Chantier  # noqa: E402
+from app.models.chantier import ChantierMaterial as ChantierMaterial  # noqa: E402

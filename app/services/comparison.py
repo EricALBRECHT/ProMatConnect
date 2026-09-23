@@ -10,7 +10,16 @@ from app.schemas.comparison import (
     SelectedLine,
     UnavailableLine,
 )
+from app.schemas.location import ResolvedOrigin
 from app.services.distance import haversine_km
+from app.services.optimization import ProcurementOptimizer
+from app.services.procurement_cost import CostParameters, ProcurementCostService
+from app.services.routing import (
+    ExactRouteOrderOptimizer,
+    FakeRoutingService,
+    RouteOrderOptimizer,
+    RoutingService,
+)
 
 CENT = Decimal("0.01")
 
@@ -28,10 +37,34 @@ def line_cost(offer: ConnectorOffer, quantity: Decimal) -> Decimal:
 class ComparisonService:
     """Service sans ORM ni connaissance des fournisseurs : seules les interfaces sont injectées."""
 
-    def __init__(self, connectors: list[SupplierConnector], latitude: float, longitude: float):
+    def __init__(
+        self,
+        connectors: list[SupplierConnector],
+        latitude: float,
+        longitude: float,
+        *,
+        origin: ResolvedOrigin | None = None,
+        routing: RoutingService | None = None,
+        cost_parameters: CostParameters | None = None,
+        order_optimizer: RouteOrderOptimizer | None = None,
+        max_agencies: int = 8,
+    ):
         self.connectors = connectors
         self.latitude = latitude
         self.longitude = longitude
+        self.origin = origin or ResolvedOrigin(
+            latitude=latitude,
+            longitude=longitude,
+            type="site",
+            label="Chantier",
+            source="configuration",
+        )
+        self.latitude = self.origin.latitude
+        self.longitude = self.origin.longitude
+        self.cost_parameters = cost_parameters or CostParameters()
+        self.routing = routing or FakeRoutingService()
+        self.order_optimizer = order_optimizer or ExactRouteOrderOptimizer()
+        self.max_agencies = max_agencies
 
     def compare(
         self, lines: list[CartLine], products: dict[int, ProductRead]
@@ -49,8 +82,25 @@ class ComparisonService:
             for index, connector in enumerate(self.connectors, start=1)
         ]
         options.append(self._option("optimized", "Panier optimisé", lines, products, offers))
+        strategies, delta = ProcurementOptimizer(
+            self.routing,
+            self.order_optimizer,
+            ProcurementCostService(self.cost_parameters),
+            self.max_agencies,
+        ).optimize(
+            lines,
+            offers,
+            self.origin,
+            lambda selected: self._option("candidate", "", lines, products, selected),
+        )
         return ComparisonResponse(
-            user_latitude=self.latitude, user_longitude=self.longitude, options=options
+            origin=self.origin,
+            cost_parameters=self.cost_parameters,
+            strategies=strategies,
+            minimum_vs_single=delta,
+            user_latitude=self.latitude,
+            user_longitude=self.longitude,
+            options=options,
         )
 
     def _distance(self, offer: ConnectorOffer) -> float:

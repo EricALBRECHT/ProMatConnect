@@ -12,6 +12,8 @@ from sqlalchemy.orm import sessionmaker
 from app.config import Settings
 from app.database import Base, make_engine
 from app.routes.api import router
+from app.routes.chantiers import router as chantiers_router
+from app.services.geocoding import FakeGeocodingService
 from scripts.seed import seed
 
 logger = logging.getLogger(__name__)
@@ -38,11 +40,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application = FastAPI(
         title="ProMatConnect",
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
         description="Comparaison B2B de matériaux — données fictives uniquement, prix en EUR HT.",
     )
     application.include_router(router)
+    application.include_router(chantiers_router)
     application.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
     templates = Jinja2Templates(directory=ROOT / "templates")
 
@@ -63,6 +66,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             context={
                 "latitude": settings.user_latitude,
                 "longitude": settings.user_longitude,
+                "site_address": settings.site_address,
+                "company_address": settings.company_address,
+                "demo_addresses": list(FakeGeocodingService.ADDRESSES),
             },
         )
 

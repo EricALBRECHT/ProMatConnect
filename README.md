@@ -1,12 +1,13 @@
-# ProMatConnect — MVP technique 0.1
+# ProMatConnect — MVP technique 0.2
 
-Comparateur B2B de matériaux pour les artisans du bâtiment. L'application permet de
-constituer une liste, de modifier les quantités et de comparer trois options :
-**tout chez POINT.P TEST**, **tout chez GEDIMAT TEST** et **panier optimisé**.
+Optimiseur d'approvisionnement B2B pour les artisans du bâtiment. Constituez une liste,
+choisissez votre point de départ et comparez **1 seul arrêt**, **Prix matériaux minimum**
+et **Meilleur compromis**. L'interface conserve aussi la comparaison par enseigne V0.1
+sous un volet dépliable ; le contrat historique `options` reste présent dans l'API.
 
-Toutes les agences, références, disponibilités et offres sont **simulées**.
+Toutes les agences, références, disponibilités, offres et données routières sont **simulées**.
 Aucun scraping, appel d'API fournisseur, compte utilisateur, paiement, commande,
-facturation, chantier ou livraison n'est intégré. Les prix sont en **EUR HT**.
+facturation, gestion de chantiers ou livraison n'est intégré. Les prix sont en **EUR HT**.
 
 ## Démarrage avec Docker
 
@@ -15,11 +16,14 @@ Sous WSL, activer l'intégration de la distribution dans Docker Desktop.
 
 ```bash
 cd /home/pi/Batiplus/App
-cp .env.example .env
+test -f .env || cp .env.example .env
 docker compose up --build
 ```
 
 Le chemin ci-dessus correspond au dossier de cette livraison ; adapter si déplacé.
+Pour une mise à jour V0.1 → V0.2, conserver `.env` et le volume existants. Ajouter les
+nouveaux paramètres de `.env.example` seulement pour changer les valeurs par défaut.
+Le schéma SQL et les données fournisseurs ne changent pas ; aucune migration n'est requise.
 Le démarrage fonctionne aussi sans `.env` avec les valeurs de démonstration de Compose.
 PostgreSQL doit devenir sain avant le démarrage de l'application. Les tables puis le
 seed sont initialisés automatiquement. Attendre le message de démarrage d'Uvicorn.
@@ -55,10 +59,18 @@ Le conteneur applicatif s'exécute avec un utilisateur non privilégié.
 | `POSTGRES_USER` | `promatconnect` | Utilisateur Compose |
 | `POSTGRES_PASSWORD` | `local_demo_only` | Mot de passe local Compose |
 | `APP_PORT` | `8000` | Port HTTP exposé sur localhost |
-| `USER_LATITUDE` | `48.8566` | Position fictive, de -90 à 90 |
-| `USER_LONGITUDE` | `2.3522` | Position fictive, de -180 à 180 |
+| `USER_LATITUDE` | `48.8566` | Origine de compatibilité API sans `origin`, de -90 à 90 |
+| `USER_LONGITUDE` | `2.3522` | Origine de compatibilité API sans `origin`, de -180 à 180 |
 | `SEED_ON_START` | `true` | Insérer les données de démonstration manquantes |
 | `DATABASE_URL` | URL PostgreSQL locale | Connexion SQLAlchemy hors Docker |
+| `SITE_ADDRESS` | `10 rue du Chantier, 75004 Paris` | Adresse de chantier préremplie |
+| `COMPANY_ADDRESS` | `20 rue de l'Entreprise, 75011 Paris` | Libellé local de l'entreprise |
+| `COMPANY_LATITUDE` | `48.8600` | Coordonnée de l'entreprise |
+| `COMPANY_LONGITUDE` | `2.3800` | Coordonnée de l'entreprise |
+| `COST_PER_KM` | `0.50` | Indicateur EUR/km |
+| `TIME_VALUE_PER_HOUR` | `30.00` | Valeur indicative EUR/heure |
+| `EXTRA_STOP_COST` | `5.00` | Pénalité indicative par arrêt au-delà du premier |
+| `OPTIMIZER_MAX_AGENCIES` | `8` | Limite de recherche exhaustive, configurable de 1 à 10 |
 
 Compose construit `DATABASE_URL` à partir des variables PostgreSQL ; la valeur de
 `.env` sert à l'exécution Python hors Docker. Si le mot de passe contient des
@@ -76,7 +88,8 @@ Les changements d'identifiants PostgreSQL ne reconfigurent pas un volume déjà 
 │   ├── models/__init__.py      # Cinq entités, relations et contraintes SQL
 │   ├── schemas/
 │   │   ├── catalog.py          # Produits exposés par l'API
-│   │   └── comparison.py       # Panier et résultats typés
+│   │   ├── comparison.py       # Panier, compatibilité et trois stratégies
+│   │   └── location.py         # Origine, coordonnées, segments et tournée
 │   ├── repositories/
 │   │   ├── catalog.py          # Accès ORM au catalogue interne
 │   │   └── offers.py           # Mapping des références et lecture des offres
@@ -87,8 +100,13 @@ Les changements d'identifiants PostgreSQL ne reconfigurent pas un volume déjà 
 │   │   ├── fake_gedimat.py
 │   │   └── registry.py         # Assemblage des connecteurs
 │   ├── services/
-│   │   ├── comparison.py       # Algorithme indépendant de SQL et des enseignes
-│   │   └── distance.py         # Haversine
+│   │   ├── comparison.py       # Comparaison V0.1 et orchestration V0.2
+│   │   ├── optimization.py     # Sous-ensembles d'agences et seuils de préparation
+│   │   ├── procurement_cost.py # Formule et paramètres financiers indicatifs
+│   │   ├── origin.py           # Résolution des quatre types de départ
+│   │   ├── geocoding.py        # Interface et faux géocodeur déterministe
+│   │   ├── routing.py          # Interface, grille simulée et ordre des arrêts
+│   │   └── distance.py         # Haversine conservé pour les champs historiques
 │   ├── routes/api.py          # Catalogue, comparaison, santé
 │   ├── templates/index.html   # Page responsive Jinja2
 │   └── static/
@@ -99,7 +117,12 @@ Les changements d'identifiants PostgreSQL ne reconfigurent pas un volume déjà 
 │   ├── test_catalog.py
 │   ├── test_connectors.py
 │   ├── test_comparison.py
-│   └── test_api.py
+│   ├── test_api.py
+│   ├── test_api_v02.py
+│   ├── test_origins.py
+│   ├── test_routing.py
+│   ├── test_procurement.py
+│   └── browser_smoke.cjs       # Parcours navigateur optionnel
 ├── scripts/seed.py
 ├── Dockerfile                 # Cibles runtime et test
 ├── docker-compose.yml         # PostgreSQL, web et profil de tests
@@ -174,35 +197,173 @@ PostgreSQL pour sérialiser d'éventuels démarrages simultanés. Il n'écrase p
 modifications existantes. La création initiale du schéma reste prévue pour une seule
 instance applicative, comme dans ce Compose.
 
+## Origine et géocodage
+
+Le choix initial est **Chantier**, avec une adresse modifiable. **Autre adresse**
+possède son propre champ libre. Le géocodeur fictif reconnaît uniquement ces adresses,
+proposées par le champ de saisie (casse, accents et ponctuation normalisés) :
+
+- `10 rue du Chantier, 75004 Paris` ;
+- `20 rue de l'Entreprise, 75011 Paris` ;
+- `5 rue des Artisans, 94200 Ivry-sur-Seine` ;
+- `8 rue du Depot, 93200 Saint-Denis`.
+
+Une adresse inconnue donne une erreur 422 lisible. Aucun service réseau ni position
+par défaut cachée ne remplace une adresse saisie. **Entreprise** utilise directement
+l'adresse et les coordonnées configurées ; les modifier ensemble pour les garder cohérentes.
+
+**Ma position** déclenche `navigator.geolocation.getCurrentPosition` uniquement après
+le choix volontaire de cette option ou un clic sur son bouton d'actualisation. Aucune
+requête GPS au chargement. Le navigateur gère la permission ; refus, indisponibilité
+et expiration sont affichés sans substituer une fausse position. Cette fonction
+nécessite un contexte navigateur sécurisé (HTTPS ou localhost). Une réponse GPS
+tardive est ignorée si l'utilisateur a entre-temps choisi une autre origine.
+Les coordonnées sont transmises dans le corps de la comparaison, pas dans l'URL,
+et ne sont enregistrées ni en base, ni dans le stockage local du navigateur.
+
+`OriginService` peut être réutilisé par un futur mode Express avec
+`OriginRequest(type="current_location", latitude=..., longitude=...)`, une fois les
+coordonnées autorisées obtenues. Aucun mode Express n'est implémenté ici.
+
+## Trajets simulés et ordre des arrêts
+
+`RoutingService.leg(start, end)` fournit distance et durée d'un segment dirigé.
+`route(origin, stops)` assemble la boucle **origine → agences → origine**. Les
+segments inter-agences sont calculés : on n'additionne pas les distances origine-agence.
+`RouteOrderOptimizer` est une interface distincte qui choisit l'ordre des arrêts.
+
+Le simulateur utilise une grille géographique fictive, pas Haversine :
+
+```text
+nord = abs(latitude_arrivée - latitude_départ) × 111.32
+axe_est = abs(longitude_arrivée - longitude_départ) × 111.32 × cos(latitude_moyenne)
+km_segment = arrondi_2_décimales((nord + axe_est) × 1.15)
+minutes_segment = arrondi_2_décimales(3 × km_segment + 2) si km_segment > 0, sinon 0
+```
+
+Ces constantes décrivent uniquement un réseau de démonstration. Ce ne sont pas des
+mesures routières réelles ou une estimation de trafic. Les tests peuvent injecter
+une matrice dirigée de distances/durées à la place de cette grille.
+Haversine reste disponible pour les champs historiques `agencies[].distance_km` et
+`stops[].distance_km`, qui sont **à vol d'oiseau**. Seuls `total_distance_km` et les
+segments de `route` décrivent la tournée routière simulée.
+
+L'ordre minimise **d'abord la durée totale**, puis la distance en cas d'égalité,
+puis l'ordre des identifiants pour conserver un résultat déterministe. Toutes les
+permutations sont évaluées jusqu'à trois arrêts ; au-delà, un algorithme exact
+Held-Karp travaille sur la matrice des segments. Les durées/distances de ce MVP
+ont une précision au centième. Un cache de segments et de tournées est limité à la
+comparaison en cours. Pas de cache persistant des positions.
+
 ## Règles du comparateur
 
-1. Valider 1 à 100 lignes ; rejeter les produits inconnus et les lignes dupliquées.
-   L'interface additionne les quantités lorsqu'un produit est ajouté à nouveau.
-2. Récupérer les offres actives des connecteurs pour les produits demandés.
-3. Calculer `packs = ceil(quantité demandée / reference_quantity)`.
-4. Une offre est éligible si son stock couvre ces conditionnements entiers.
-5. Comparer le **coût réellement acheté**, `packs × price`, avec arrondi au centime
-   `ROUND_HALF_UP`, et non uniquement le prix à l'unité de référence.
-6. Pour chaque option mono-fournisseur, choisir l'offre éligible la moins chère de
-   chaque ligne dans les agences de cette enseigne.
-7. Pour le panier optimisé, appliquer la même sélection sur l'ensemble des fournisseurs.
-8. À prix égal, départager par distance, délai, enseigne, agence et référence.
+Les règles de stock et de conditionnement V0.1 sont conservées : 1 à 100 lignes,
+produits existants, quantités positives et regroupées par produit, références actives,
+`packs = ceil(quantité / reference_quantity)`, stock suffisant dans **une même agence**
+pour toute une ligne. Une ligne n'est pas fractionnée entre des offres. Tous les
+prix des matériaux sont des `Decimal`, arrondis au centime `ROUND_HALF_UP`.
 
-Une ligne n'est jamais fractionnée entre deux offres/agences. Les stocks d'agences
-ne sont pas additionnés. Une option mono-fournisseur peut nécessiter plusieurs
-agences. L'algorithme minimise les matériaux achetés, pas les trajets ou le nombre
-d'arrêts ; il ne réserve aucun stock.
+L'optimiseur explore les sous-ensembles des agences éligibles et, pour chacun,
+les seuils de préparation présents dans les offres. Il choisit les lignes les moins
+chères respectant le seuil, puis calcule la tournée des agences effectivement
+utilisées. Les seuils permettent de retenir une référence légèrement plus chère
+qui sera prête beaucoup plus tôt. Il ne se contente pas de comparer les anciens
+paniers mono-fournisseurs à un unique panier de prix minimum.
 
-Pour chaque option : produits couverts/manquants, lignes détaillées avec surplus,
-références et dates, fournisseurs distincts, agences distinctes, distance de chaque
-agence depuis la position fictive et délai de préparation maximum.
-Les distances utilisent Haversine (rayon terrestre 6 371 km). Elles ne représentent
-ni un trajet routier, ni une tournée cumulée.
+Les trois stratégies ont des règles de sélection explicites :
 
-Une option incomplète renvoie `valid=false`, `total=null` et `available_subtotal`
-correspondant uniquement aux lignes couvertes. L'interface affiche **Panier incomplet**,
-jamais un sous-total comme s'il représentait le panier entier.
-Le délai maximum concerne les lignes disponibles, sans temps de déplacement.
+1. **1 seul arrêt** : coût d'approvisionnement minimal parmi les solutions complètes
+   dans **une seule agence**, qui n'est pas nécessairement l'enseigne la moins chère.
+2. **Prix matériaux minimum** : prix d'achat des matériaux minimal sur toutes les
+   agences ; départage des égalités par coût d'approvisionnement.
+3. **Meilleur compromis** : coût d'approvisionnement minimal sur les solutions
+   complètes calculées avec la règle d'ordre de visite ci-dessus.
+
+À égalité de coût : matériaux, nombre d'arrêts, durée de trajet, puis identifiants
+des agences. Une même enseigne peut compter plusieurs arrêts. Une absence de
+solution complète produit `valid=false` et des coûts `null`, jamais un panier
+partiel classé comme meilleure solution. L'API conserve les anciens sous-totaux
+partiels dans `options` et l'interface les affiche dans le volet V0.1.
+
+La recherche est bornée par `OPTIMIZER_MAX_AGENCIES` (8 par défaut, 6 dans le jeu de
+données). Un dépassement renvoie 422 avec un message explicite : aucune agence
+n'est ignorée silencieusement. Pour élargir le périmètre au-delà du MVP, remplacer
+la stratégie de recherche plutôt que supprimer cette limite.
+
+### Formule exacte du meilleur compromis
+
+Variables :
+
+- `M` : total réel des matériaux HT, conditionnements compris ;
+- `D` : distance de la tournée aller-retour, en km ;
+- `T` : durée de trajet de cette tournée, en minutes ;
+- `P` : délai maximum de préparation des offres choisies, en minutes ;
+- `N` : nombre d'agences visitées ;
+- `K` : `COST_PER_KM`, **0,50 €/km** par défaut ;
+- `V` : `TIME_VALUE_PER_HOUR`, **30 €/h** par défaut ;
+- `A` : `EXTRA_STOP_COST`, **5 €** par arrêt supplémentaire par défaut.
+
+```text
+coût_distance = arrondi_centime(D × K)
+coût_temps = arrondi_centime((T + P) × V / 60)
+pénalité_arrêts = arrondi_centime(max(N - 1, 0) × A)
+coût_estimé_approvisionnement = M + coût_distance + coût_temps + pénalité_arrêts
+```
+
+Chaque composante monétaire est arrondie **séparément**, avec `Decimal` et
+`ROUND_HALF_UP`, avant addition. Les valeurs géographiques sont converties en
+`Decimal` depuis leur représentation textuelle, jamais via `Decimal(float)`.
+
+**Hypothèse de temps explicite** : les agences préparent en parallèle ; l'artisan
+attend `P` avant de partir, puis effectue la tournée complète. Donc
+`total_minutes = P + T`. Il n'y a ni chevauchement préparation/trajet, ni simulation
+d'arrivée dans une agence avant qu'elle soit prête. C'est une hypothèse conservatrice
+à ajuster ultérieurement selon les usages réels. La pénalité d'arrêt est un indicateur
+fixe de gêne/manutention, pas une durée ajoutée.
+
+Le prix des matériaux reste visible séparément du **coût estimé non facturé**.
+Ce coût sert uniquement à comparer les solutions ; il ne crée aucune facturation.
+
+### Exemple vérifié
+
+Origine `10 rue du Chantier, 75004 Paris`, panier : 30 BA13, 10 rails, 20 montants.
+Paramètres par défaut, données de seed inchangées :
+
+| Stratégie | Matériaux HT | Arrêts | Distance A/R | Trajet | Préparation max. | Coût estimé non facturé |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 seul arrêt | 380,20 € | 1 | 13,80 km | 45,40 min | 150 min | 484,80 € |
+| Prix matériaux minimum | 375,40 € | 2 | 15,33 km | 51,99 min | 150 min | 489,07 € |
+| Meilleur compromis | 377,40 € | 3 | 21,48 km | 72,44 min | 90 min | 479,36 € |
+
+Le prix minimum économise **4,80 € de matériaux** contre l'arrêt unique, mais ajoute
+**6,59 minutes de trajet** et **1,53 km**. Le compromis retient trois arrêts car la
+préparation maximale descend à 90 minutes. Son temps total est **162,44 min**, contre
+195,40 min pour un seul arrêt ; son coût calculé est :
+
+```text
+377,40 + (21,48 × 0,50) + ((72,44 + 90) × 30 / 60) + (2 × 5)
+= 377,40 + 10,74 + 81,22 + 10,00
+= 479,36 €
+```
+
+Ordre du compromis : Chantier → GEDIMAT TEST Paris Est → POINT.P TEST Paris Est →
+GEDIMAT TEST Ivry → Chantier. L'interface détaille chaque segment, le calcul et les
+matériaux affectés à chaque agence dans trois volets dépliables.
+
+## Remplacer les services géographiques ultérieurement
+
+- Implémenter `GeocodingService.geocode(address)` en retournant `Coordinates` et
+  définir son identifiant `provider`. Brancher l'instance dans `get_geocoding_service`.
+- Implémenter `RoutingService.leg(start, end)` en retournant un `RouteLeg` validé,
+  avec distance/durée par segment dirigé, normalisées au centième. Définir `provider`
+  et `simulated=False`, puis remplacer `get_routing_service`.
+- Garder la résolution d'origine, les connecteurs et le moteur de comparaison
+  inchangés. L'API utilise des dépendances FastAPI surchargeables dans les tests.
+- Si nécessaire, fournir un autre `RouteOrderOptimizer` au constructeur du
+  comparateur. Aucun nom de fournisseur cartographique n'est inscrit dans le moteur.
+- Pour un futur service réseau, définir dans l'adaptateur les délais, erreurs,
+  limites et règles de fallback explicites. Ne jamais transformer une panne en
+  itinéraire réel fictif. Aucun fournisseur réseau ni fallback réseau n'est ajouté ici.
 
 ## Connecteurs et extension future
 
@@ -250,8 +411,32 @@ ne font pas partie de cette livraison.
 ```bash
 curl -X POST http://localhost:8000/api/compare \
   -H 'Content-Type: application/json' \
-  -d '{"lines":[{"product_id":1,"quantity":"30"},{"product_id":2,"quantity":"10"},{"product_id":3,"quantity":"20"}]}'
+  -d '{"lines":[{"product_id":1,"quantity":"30"},{"product_id":2,"quantity":"10"},{"product_id":3,"quantity":"20"}],"origin":{"type":"site","address":"10 rue du Chantier, 75004 Paris"}}'
 ```
+
+Formats d'origine :
+
+```json
+{"type": "site", "address": "10 rue du Chantier, 75004 Paris"}
+{"type": "current_location", "latitude": 48.8566, "longitude": 2.3522}
+{"type": "company"}
+{"type": "other", "address": "5 rue des Artisans, 94200 Ivry-sur-Seine"}
+```
+
+`site` et `other` acceptent aussi une paire de coordonnées à la place de l'adresse.
+Il faut choisir adresse **ou** coordonnées ; latitude/longitude doivent être fournies
+ensemble, finies et dans leurs bornes. `company` utilise uniquement la configuration.
+`origin` absent ou nul conserve le comportement V0.1 avec `USER_LATITUDE/LONGITUDE`.
+
+La réponse ajoute `origin` résolue, `cost_parameters`, `strategies` et
+`minimum_vs_single` (écarts signés, nul si aucune solution à un arrêt).
+Chaque stratégie contient `material_total`, `estimated_procurement_cost`, `stops`
+(liste **ordonnée**, donc `len(stops)` = nombre d'arrêts), `supplier_count`,
+`total_distance_km`, `travel_minutes`, `max_preparation_minutes`, `total_minutes`,
+`route` (points, segments, fournisseur simulé, méthode d'ordre), `lines`,
+`cost_breakdown`, `unavailable`, `valid` et `explanation`.
+Les montants et totaux décimaux restent des chaînes JSON.
+`options` conserve intégralement les trois comparaisons par fournisseur V0.1.
 
 Les identifiants ci-dessus correspondent à une base neuve. Consulter le catalogue
 si les données ont été modifiées. Les erreurs SQL renvoient un message 503 générique
@@ -302,7 +487,25 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 Couverture fonctionnelle : catalogue, seed idempotent, contraintes de données,
 mappings actifs, connecteurs, décimaux, conversions, stocks limites, arrondis de
 conditionnements, comparaison mono/multi, ruptures, distances, validation API,
-réponses d'erreur, page HTML, fichiers statiques et Swagger.
+réponses d'erreur, page HTML, fichiers statiques et Swagger. V0.2 ajoute les origines,
+le géocodage simulé, les boucles dirigées, les permutations, Held-Karp, la formule
+financière, les seuils de préparation, la sélection d'un vrai arrêt unique et le
+contrôle du compromis contre une énumération indépendante des affectations.
+
+Le parcours navigateur optionnel `tests/browser_smoke.cjs` utilise Playwright,
+uniquement comme outil de vérification hors de l'application :
+
+```bash
+npm install --prefix /tmp/promatconnect-browser playwright@1.58.2
+/tmp/promatconnect-browser/node_modules/.bin/playwright install chromium
+NODE_PATH=/tmp/promatconnect-browser/node_modules node tests/browser_smoke.cjs
+```
+
+Chromium nécessite ses bibliothèques système usuelles. `APP_URL` permet de choisir
+une autre URL locale. Le script vérifie ordinateur/mobile, les quatre origines,
+le refus GPS, l'absence de géolocalisation automatique, une réponse GPS tardive,
+les résultats, les détails et les ruptures. Ses captures sont écrites dans le dossier
+temporaire du système, sans ajouter d'images au dépôt.
 
 ## État de validation de la livraison
 
@@ -319,5 +522,9 @@ réussi ni un lancement des conteneurs.
 - Création de schéma par `create_all`, sans migration de schéma existant. Prévoir
   des migrations avant une évolution du modèle sur des données conservées.
 - Démonstration locale sans authentification ; aucun déploiement public inclus.
-- Pas de calcul TVA, de frais de trajet, de distance routière, d'horaires d'ouverture,
-  de fractionnement d'une ligne ni d'optimisation du nombre d'arrêts.
+- Pas de calcul TVA, de facturation des déplacements, d'horaires d'ouverture,
+  de navigation réelle, de trafic, de fractionnement d'une ligne ni de mode Express.
+- Géocodage limité aux adresses fictives ; routage en grille simulée, pas une carte routière.
+- Préparation maximale entièrement attendue avant le départ, sans chevauchement du trajet.
+- Exploration bornée à 8 agences par défaut ; à élargir via une stratégie adaptée avant
+  le raccordement à un vaste réseau réel.

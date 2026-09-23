@@ -10,6 +10,11 @@ from app.repositories.catalog import CatalogRepository
 from app.schemas.catalog import ProductRead
 from app.schemas.comparison import CompareRequest, ComparisonResponse
 from app.services.comparison import ComparisonService
+from app.services.geocoding import AddressNotFound, FakeGeocodingService, GeocodingService
+from app.services.optimization import OptimizationLimitError
+from app.services.origin import OriginService
+from app.services.procurement_cost import CostParameters
+from app.services.routing import FakeRoutingService, RoutingService
 
 router = APIRouter(prefix="/api")
 
@@ -40,8 +45,22 @@ def product(product_id: int, session: SessionDependency):
     return result
 
 
+def get_geocoding_service() -> GeocodingService:
+    return FakeGeocodingService()
+
+
+def get_routing_service() -> RoutingService:
+    return FakeRoutingService()
+
+
 @router.post("/compare", response_model=ComparisonResponse, tags=["Comparaison"])
-def compare(payload: CompareRequest, request: Request, session: SessionDependency):
+def compare(
+    payload: CompareRequest,
+    request: Request,
+    session: SessionDependency,
+    geocoder: Annotated[GeocodingService, Depends(get_geocoding_service)],
+    routing: Annotated[RoutingService, Depends(get_routing_service)],
+):
     product_ids = [line.product_id for line in payload.lines]
     products = {
         p.id: ProductRead.model_validate(p)
@@ -51,14 +70,26 @@ def compare(payload: CompareRequest, request: Request, session: SessionDependenc
     if missing:
         raise HTTPException(404, {"message": "Produits introuvables.", "product_ids": missing})
     settings = request.app.state.settings
-    return ComparisonService(
-        build_connectors(session),
-        settings.user_latitude,
-        settings.user_longitude,
-    ).compare(payload.lines, products)
+    try:
+        origin = OriginService(settings, geocoder).resolve(payload.origin)
+        return ComparisonService(
+            build_connectors(session),
+            origin.latitude,
+            origin.longitude,
+            origin=origin,
+            routing=routing,
+            cost_parameters=CostParameters(
+                cost_per_km=settings.cost_per_km,
+                time_value_per_hour=settings.time_value_per_hour,
+                extra_stop_cost=settings.extra_stop_cost,
+            ),
+            max_agencies=settings.optimizer_max_agencies,
+        ).compare(payload.lines, products)
+    except (AddressNotFound, OptimizationLimitError) as error:
+        raise HTTPException(422, str(error)) from error
 
 
 @router.get("/health", tags=["Exploitation"])
 def health(session: SessionDependency):
     session.execute(text("SELECT 1"))
-    return {"status": "ok", "version": "0.1.0", "mode": "simulation"}
+    return {"status": "ok", "version": "0.2.0", "mode": "simulation"}
