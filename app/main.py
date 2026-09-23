@@ -1,0 +1,72 @@
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
+
+from app.config import Settings
+from app.database import Base, make_engine
+from app.routes.api import router
+from scripts.seed import seed
+
+logger = logging.getLogger(__name__)
+ROOT = Path(__file__).parent
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or Settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        engine = make_engine(settings.database_url)
+        app.state.settings = settings
+        app.state.session_factory = sessionmaker(engine, expire_on_commit=False)
+        try:
+            Base.metadata.create_all(engine)
+            if settings.seed_on_start:
+                with app.state.session_factory() as session:
+                    seed(session)
+                logger.info("ProMatConnect : catalogue simulé prêt.")
+            yield
+        finally:
+            engine.dispose()
+
+    application = FastAPI(
+        title="ProMatConnect",
+        version="0.1.0",
+        lifespan=lifespan,
+        description="Comparaison B2B de matériaux — données fictives uniquement, prix en EUR HT.",
+    )
+    application.include_router(router)
+    application.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+    templates = Jinja2Templates(directory=ROOT / "templates")
+
+    @application.exception_handler(SQLAlchemyError)
+    async def database_error(request: Request, exc: SQLAlchemyError):
+        # Ne pas journaliser la chaîne de connexion, les paramètres SQL ou les données du panier.
+        logger.error("Erreur base de données : %s", type(exc).__name__)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Le service de données est temporairement indisponible. Réessayez."},
+        )
+
+    @application.get("/", include_in_schema=False)
+    def home(request: Request):
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                "latitude": settings.user_latitude,
+                "longitude": settings.user_longitude,
+            },
+        )
+
+    return application
+
+
+app = create_app()
