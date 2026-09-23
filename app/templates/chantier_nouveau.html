@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}ProMatConnect — Nouveau chantier{% endblock %}
+{% block description %}Créez un nouveau chantier pour y associer vos matériaux.{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='/materials.js') }}" defer></script>
+<script src="{{ url_for('static', path='/chantiers.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">MES CHANTIERS</p>
+    <h1>Nouveau chantier</h1>
+    <p class="lead">Renseignez l’essentiel. Les matériaux s’ajoutent ensuite.</p>
+  </div>
+</section>
+<section class="workspace form-panel" data-page="chantier-new">
+  <form id="chantier-form" class="stacked-form" novalidate>
+    <div>
+      <label for="nom">Nom du chantier *</label>
+      <input id="nom" name="nom" required maxlength="200" autocomplete="off" />
+    </div>
+    <div>
+      <label for="client">Client</label>
+      <input id="client" name="client" maxlength="200" autocomplete="organization" />
+    </div>
+    <div>
+      <label for="adresse">Adresse *</label>
+      <input
+        id="adresse"
+        name="adresse"
+        required
+        maxlength="300"
+        autocomplete="street-address"
+      />
+    </div>
+    <div>
+      <label for="date_prevue">Date prévue</label>
+      <input id="date_prevue" name="date_prevue" type="date" />
+    </div>
+    <div>
+      <label for="notes">Notes</label>
+      <textarea id="notes" name="notes" rows="4" maxlength="10000"></textarea>
+    </div>
+    {# latitude / longitude : champs prêts pour une étape ultérieure.
+       Réutiliser FakeGeocodingService + adresses de démo du comparateur,
+       plutôt que d’ajouter un second géocodeur. #}
+    <input type="hidden" id="latitude" name="latitude" value="" />
+    <input type="hidden" id="longitude" name="longitude" value="" />
+    <p class="form-hint muted">
+      La localisation GPS pourra réutiliser le géocodeur de démonstration du
+      comparateur. Pour cette étape, seules l’adresse et les informations
+      textuelles sont enregistrées.
+    </p>
+    <div class="form-actions">
+      <a class="button secondary" href="/chantiers">Annuler</a>
+      <button type="submit" class="button primary" id="create-button">
+        Créer le chantier
+      </button>
+    </div>
+  </form>
+</section>
+<p id="status" class="status" role="status" aria-live="polite"></p>
+{% endblock %}

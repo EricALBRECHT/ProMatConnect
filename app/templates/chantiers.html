@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}ProMatConnect — Mes chantiers{% endblock %}
+{% block description %}Retrouvez et ouvrez vos chantiers enregistrés.{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='/materials.js') }}" defer></script>
+<script src="{{ url_for('static', path='/chantiers.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<section class="page-header" data-page="chantiers-list">
+  <div>
+    <p class="eyebrow">VOS CHANTIERS</p>
+    <h1>Mes chantiers</h1>
+    <p class="lead">Retrouvez vos chantiers et ouvrez-en un pour le compléter.</p>
+  </div>
+  <a class="button primary" href="/chantiers/nouveau">+ Nouveau chantier</a>
+</section>
+<p id="status" class="status" role="status" aria-live="polite">Chargement…</p>
+<div id="chantiers-empty" class="empty panel" hidden>
+  <span aria-hidden="true">+</span>
+  <strong>Aucun chantier pour le moment</strong>
+  <p>Créez un premier chantier pour y associer vos matériaux.</p>
+  <a class="button secondary" href="/chantiers/nouveau">+ Nouveau chantier</a>
+</div>
+<div id="chantiers-grid" class="chantier-grid" hidden></div>
+{% endblock %}

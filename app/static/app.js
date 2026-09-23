@@ -1,112 +1,58 @@
 "use strict";
-const $ = (id) => document.getElementById(id);
-let products = [];
-let cart = [];
-let revision = 0;
+
+const {
+  $,
+  node,
+  fetchProducts,
+  fillProductSelect,
+  bindMaterialLines,
+  apiErrorMessage,
+} = window.ProMatMaterials;
+
 const money = (value) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(
     value,
   );
 const number = (value) =>
   new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 3 }).format(value);
-function node(tag, text, className) {
-  const element = document.createElement(tag);
-  if (text !== undefined) element.textContent = text;
-  if (className) element.className = className;
-  return element;
-}
+
+let products = [];
+let cart = [];
+let revision = 0;
+
 function status(message = "", error = false) {
   $("status").textContent = message;
   $("status").className = error ? "status error" : "status";
 }
+
 function invalidate() {
   revision++;
   $("results-section").hidden = true;
   status();
 }
-function renderProducts() {
-  const query = $("search").value.trim().toLocaleLowerCase("fr");
-  const filtered = products.filter((p) =>
-    `${p.name} ${p.code} ${p.category}`.toLocaleLowerCase("fr").includes(query),
-  );
-  $("product").replaceChildren(
-    ...filtered.map((p) => {
-      const option = node("option", `${p.name} · ${p.reference_unit}`);
-      option.value = p.id;
-      return option;
-    }),
-  );
-  if (!filtered.length) {
-    const option = node("option", "Aucun matériau trouvé");
-    option.value = "";
-    $("product").append(option);
-  }
+
+function getCart() {
+  return cart;
 }
-function renderCart() {
-  $("cart-body").replaceChildren();
-  cart.forEach((line) => {
-    const product = products.find((p) => p.id === line.product_id);
-    const row = node("tr");
-    const name = node("td", product.name);
-    name.append(node("small", `${product.code} · ${product.category}`));
-    const quantityCell = node("td");
-    const input = node("input", undefined, "line-quantity");
-    Object.assign(input, {
-      type: "number",
-      min: "0.001",
-      max: "1000000",
-      step: "0.001",
-      value: line.quantity,
-      required: true,
-    });
-    input.setAttribute("aria-label", `Quantité pour ${product.name}`);
-    input.addEventListener("input", () => {
-      line.quantity = input.value;
-      invalidate();
-    });
-    quantityCell.append(input);
-    const removeCell = node("td");
-    const remove = node("button", "×", "remove");
-    remove.type = "button";
-    remove.setAttribute("aria-label", `Supprimer ${product.name}`);
-    remove.addEventListener("click", () => {
-      cart = cart.filter((l) => l !== line);
-      invalidate();
-      renderCart();
-    });
-    removeCell.append(remove);
-    row.append(
-      name,
-      quantityCell,
-      node("td", product.reference_unit),
-      removeCell,
-    );
-    $("cart-body").append(row);
-  });
-  $("empty-cart").hidden = cart.length > 0;
-  $("line-count").textContent =
-    `${cart.length} produit${cart.length > 1 ? "s" : ""}`;
-  $("compare").disabled = cart.length === 0;
+
+function setCart(lines) {
+  cart = lines;
 }
-$("search").addEventListener("input", renderProducts);
-$("add-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const id = Number($("product").value);
-  if (!id) return;
-  const existing = cart.find((l) => l.product_id === id);
-  const quantity = Number($("quantity").value);
-  if (existing) {
-    const combined =
-      Math.round((Number(existing.quantity) + quantity) * 1000) / 1000;
-    if (combined > 1000000) {
-      status("La quantité maximale par produit est de 1 000 000.", true);
-      return;
-    }
-    existing.quantity = String(combined);
-  } else cart.push({ product_id: id, quantity: String(quantity) });
-  invalidate();
-  renderCart();
+
+const materialList = bindMaterialLines({
+  getProducts: () => products,
+  getLines: getCart,
+  setLines: setCart,
+  onChange: invalidate,
+  status,
 });
+
+const renderProducts = materialList.renderProducts;
+const renderCart = () => {
+  materialList.renderLines();
+  $("compare").disabled = cart.length === 0;
+};
+
 $("example").addEventListener("click", () => {
   cart = ["PMC0001", "PMC0002", "PMC0003"].map((code, i) => ({
     product_id: products.find((p) => p.code === code).id,
@@ -115,6 +61,7 @@ $("example").addEventListener("click", () => {
   invalidate();
   renderCart();
 });
+
 function renderStrategy(option) {
   const card = node(
     "article",
@@ -218,10 +165,10 @@ function renderStrategy(option) {
     `Coût estimé : ${money(option.estimated_procurement_cost)}. Aucun montant de déplacement ou de temps n’est facturé par l’application.`,
   ].forEach((text) => calculation.append(node("p", text)));
   card.append(calculation);
-  const products = node("details");
-  products.append(node("summary", "Matériaux par agence"));
+  const productsBlock = node("details");
+  productsBlock.append(node("summary", "Matériaux par agence"));
   option.stops.forEach((stop) => {
-    products.append(
+    productsBlock.append(
       node("h4", stop.name),
       node("p", `${stop.address}, ${stop.postal_code} ${stop.city}`),
     );
@@ -249,12 +196,13 @@ function renderStrategy(option) {
             `Offre fictive du ${new Date(line.updated_at).toLocaleDateString("fr-FR")}`,
           ),
         );
-        products.append(detail);
+        productsBlock.append(detail);
       });
   });
-  card.append(products);
+  card.append(productsBlock);
   return card;
 }
+
 let lastComparison = null;
 function renderComparison(data) {
   lastComparison = data;
@@ -318,12 +266,14 @@ function renderComparison(data) {
     }),
   );
 }
+
 let currentCoordinates = null;
 let positionRequest = 0;
 const savedAddresses = { site: $("origin-address").value, other: "" };
 let previousOriginType = "site";
 const originType = () =>
   document.querySelector('input[name="origin-type"]:checked').value;
+
 function requestPosition() {
   if (originType() !== "current_location") return;
   const token = ++positionRequest;
@@ -357,6 +307,7 @@ function requestPosition() {
     { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 },
   );
 }
+
 document.querySelectorAll('input[name="origin-type"]').forEach((input) => {
   input.addEventListener("change", () => {
     if (["site", "other"].includes(previousOriginType))
@@ -373,12 +324,12 @@ document.querySelectorAll('input[name="origin-type"]').forEach((input) => {
       type === "other" ? "Autre adresse de départ" : "Adresse du chantier";
     previousOriginType = type;
     invalidate();
-    // Appel uniquement après choix explicite de « Ma position », jamais au chargement.
     if (type === "current_location") requestPosition();
   });
 });
 $("locate").addEventListener("click", requestPosition);
 $("origin-address").addEventListener("input", invalidate);
+
 function selectedOrigin() {
   const type = originType();
   if (type === "company") return { type };
@@ -395,6 +346,7 @@ function selectedOrigin() {
   if (!$("origin-address").reportValidity()) return null;
   return { type, address: $("origin-address").value.trim() };
 }
+
 $("compare").addEventListener("click", async () => {
   for (const input of $("cart-body").querySelectorAll("input")) {
     if (!input.reportValidity()) return;
@@ -415,9 +367,10 @@ $("compare").addEventListener("click", async () => {
     if (!response.ok) {
       const payload = await response.json();
       throw new Error(
-        typeof payload.detail === "string"
-          ? payload.detail
-          : "Impossible de comparer ce panier. Vérifiez les produits et les quantités.",
+        apiErrorMessage(
+          payload,
+          "Impossible de comparer ce panier. Vérifiez les produits et les quantités.",
+        ),
       );
     }
     const data = await response.json();
@@ -433,23 +386,21 @@ $("compare").addEventListener("click", async () => {
     $("compare").disabled = !cart.length;
   }
 });
+
 async function init() {
   $("example").disabled = true;
   try {
-    const response = await fetch("/api/products");
-    if (!response.ok)
-      throw new Error(
-        "Catalogue indisponible. Rechargez la page pour réessayer.",
-      );
-    products = await response.json();
+    products = await fetchProducts();
     renderProducts();
     renderCart();
     $("example").disabled = !["PMC0001", "PMC0002", "PMC0003"].every((code) =>
       products.some((p) => p.code === code),
     );
   } catch (error) {
+    fillProductSelect($("product"), []);
     $("product").replaceChildren(node("option", "Catalogue indisponible"));
     status(error.message, true);
   }
 }
+
 init();

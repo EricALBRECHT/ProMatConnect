@@ -1,0 +1,21 @@
+<header class="topbar">
+  <a class="brand" href="/" aria-label="ProMatConnect, accueil"
+    ><span class="logo" aria-hidden="true">P<span>+</span></span
+    >ProMat<span>Connect</span></a
+  >
+  <nav class="main-nav" aria-label="Navigation principale">
+    <a
+      href="/"
+      class="nav-link{% if nav_active == 'compare' %} is-active{% endif %}"
+      {% if nav_active == 'compare' %}aria-current="page"{% endif %}
+      >Comparateur</a
+    >
+    <a
+      href="/chantiers"
+      class="nav-link{% if nav_active == 'chantiers' %} is-active{% endif %}"
+      {% if nav_active == 'chantiers' %}aria-current="page"{% endif %}
+      >Mes chantiers</a
+    >
+  </nav>
+  <span class="demo">MVP 0.2 · Simulation</span>
+</header>

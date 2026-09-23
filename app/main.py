@@ -2,7 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -13,6 +13,7 @@ from app.config import Settings
 from app.database import Base, make_engine
 from app.routes.api import router
 from app.routes.chantiers import router as chantiers_router
+from app.services.chantiers import ChantierNotFound, ChantierService
 from app.services.geocoding import FakeGeocodingService
 from scripts.seed import seed
 
@@ -64,12 +65,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request=request,
             name="index.html",
             context={
+                "nav_active": "compare",
                 "latitude": settings.user_latitude,
                 "longitude": settings.user_longitude,
                 "site_address": settings.site_address,
                 "company_address": settings.company_address,
                 "demo_addresses": list(FakeGeocodingService.ADDRESSES),
             },
+        )
+
+    @application.get("/chantiers", include_in_schema=False)
+    def chantiers_list(request: Request):
+        return templates.TemplateResponse(
+            request=request,
+            name="chantiers.html",
+            context={"nav_active": "chantiers"},
+        )
+
+    @application.get("/chantiers/nouveau", include_in_schema=False)
+    def chantiers_nouveau(request: Request):
+        return templates.TemplateResponse(
+            request=request,
+            name="chantier_nouveau.html",
+            context={"nav_active": "chantiers"},
+        )
+
+    @application.get("/chantiers/{chantier_id}", include_in_schema=False)
+    def chantiers_detail(request: Request, chantier_id: int):
+        with request.app.state.session_factory() as session:
+            try:
+                chantier = ChantierService(session).get(chantier_id)
+            except ChantierNotFound as error:
+                raise HTTPException(404, str(error)) from error
+        return templates.TemplateResponse(
+            request=request,
+            name="chantier_detail.html",
+            context={"nav_active": "chantiers", "chantier": chantier},
         )
 
     return application

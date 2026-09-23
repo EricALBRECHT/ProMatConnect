@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}ProMatConnect — {{ chantier.nom }}{% endblock %}
+{% block description %}Détail et matériaux du chantier {{ chantier.nom }}.{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='/materials.js') }}" defer></script>
+<script src="{{ url_for('static', path='/chantiers.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<section
+  class="page-header"
+  data-page="chantier-detail"
+  data-chantier-id="{{ chantier.id }}"
+>
+  <div>
+    <p class="eyebrow">MES CHANTIERS</p>
+    <h1 id="detail-title">{{ chantier.nom }}</h1>
+    <p class="lead">
+      Modifiez les informations et les matériaux, puis enregistrez.
+    </p>
+  </div>
+  <a class="text-button back-link" href="/chantiers">← Retour à la liste</a>
+</section>
+<section class="workspace form-panel">
+  <form id="chantier-form" class="stacked-form" novalidate>
+    <div>
+      <label for="nom">Nom du chantier *</label>
+      <input id="nom" name="nom" required maxlength="200" autocomplete="off" />
+    </div>
+    <div>
+      <label for="client">Client</label>
+      <input id="client" name="client" maxlength="200" autocomplete="organization" />
+    </div>
+    <div>
+      <label for="adresse">Adresse *</label>
+      <input
+        id="adresse"
+        name="adresse"
+        required
+        maxlength="300"
+        autocomplete="street-address"
+      />
+    </div>
+    <div>
+      <label for="date_prevue">Date prévue</label>
+      <input id="date_prevue" name="date_prevue" type="date" />
+    </div>
+    <div>
+      <label for="notes">Notes</label>
+      <textarea id="notes" name="notes" rows="4" maxlength="10000"></textarea>
+    </div>
+    <input type="hidden" id="latitude" name="latitude" />
+    <input type="hidden" id="longitude" name="longitude" />
+    <input type="hidden" id="updated_at" name="updated_at" />
+  </form>
+</section>
+<section class="workspace" aria-labelledby="materials-title">
+  <div class="section-heading">
+    <h2 id="materials-title">Matériaux</h2>
+    <span id="line-count" class="muted">0 produit</span>
+  </div>
+  <form id="add-form" class="add-form">
+    <div class="search-field">
+      <label for="search">Rechercher un matériau</label
+      ><input
+        id="search"
+        type="search"
+        placeholder="BA13, rail, ciment…"
+        autocomplete="off"
+      /><label class="sr-only" for="product">Produit du catalogue</label
+      ><select id="product" required>
+        <option value="">Chargement du catalogue…</option>
+      </select>
+    </div>
+    <div>
+      <label for="quantity">Quantité</label
+      ><input
+        id="quantity"
+        type="number"
+        value="1"
+        min="0.001"
+        max="1000000"
+        step="0.001"
+        required
+      />
+    </div>
+    <button type="submit" class="button secondary">+ Ajouter</button>
+  </form>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Produit</th>
+          <th>Quantité</th>
+          <th>Unité</th>
+          <th><span class="sr-only">Supprimer</span></th>
+        </tr>
+      </thead>
+      <tbody id="cart-body"></tbody>
+    </table>
+  </div>
+  <div id="empty-cart" class="empty">
+    <span aria-hidden="true">+</span>
+    <strong>Aucun matériau pour l’instant</strong>
+    <p>Ajoutez des produits du catalogue à ce chantier.</p>
+  </div>
+  <div class="cart-footer detail-actions">
+    <button
+      type="button"
+      class="button secondary"
+      id="compare-prices"
+      disabled
+      title="Disponible dans une prochaine étape"
+    >
+      Comparer les prix
+      <span class="button-note">Bientôt</span>
+    </button>
+    <button type="button" class="button primary" id="save-button">
+      Enregistrer
+    </button>
+  </div>
+</section>
+<p id="status" class="status" role="status" aria-live="polite">Chargement…</p>
+{% endblock %}
