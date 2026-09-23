@@ -31,6 +31,11 @@ function invalidate() {
   status();
 }
 
+function syncCompareButton() {
+  // Historique : le panier non vide active le bouton ; l'origine se valide au clic.
+  $("compare").disabled = cart.length === 0;
+}
+
 function getCart() {
   return cart;
 }
@@ -43,14 +48,17 @@ const materialList = bindMaterialLines({
   getProducts: () => products,
   getLines: getCart,
   setLines: setCart,
-  onChange: invalidate,
+  onChange: () => {
+    invalidate();
+    syncCompareButton();
+  },
   status,
 });
 
 const renderProducts = materialList.renderProducts;
 const renderCart = () => {
   materialList.renderLines();
-  $("compare").disabled = cart.length === 0;
+  syncCompareButton();
 };
 
 $("example").addEventListener("click", () => {
@@ -383,7 +391,7 @@ $("compare").addEventListener("click", async () => {
     if (revision === requestedRevision)
       status(error.message || "Connexion impossible. Réessayez.", true);
   } finally {
-    $("compare").disabled = !cart.length;
+    syncCompareButton();
   }
 });
 

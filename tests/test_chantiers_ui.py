@@ -145,3 +145,19 @@ def test_comparator_assets_still_load_shared_materials(client):
     assert "/static/materials.js" in home
     assert "/static/app.js" in home
     assert client.get("/static/app.js").status_code == 200
+
+
+def test_compare_button_resyncs_after_materials_js_cart_change():
+    """Non-régression : ajout/suppression via bindMaterialLines doit piloter #compare."""
+    app_js = Path("app/static/app.js").read_text(encoding="utf-8")
+    assert "function syncCompareButton" in app_js
+    assert ' $("compare").disabled = cart.length === 0' in app_js or (
+        '$("compare").disabled = cart.length === 0' in app_js
+    )
+    on_change_block = app_js.split("onChange: () =>", 1)[1].split("},", 1)[0]
+    assert "invalidate()" in on_change_block
+    assert "syncCompareButton()" in on_change_block
+    finally_block = app_js.split("} finally {", 1)[1].split("});", 1)[0]
+    assert "syncCompareButton()" in finally_block
+    detail = Path("app/templates/chantier_detail.html").read_text(encoding="utf-8")
+    assert 'id="compare-prices"' in detail and "disabled" in detail

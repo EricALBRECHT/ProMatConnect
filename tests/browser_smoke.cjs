@@ -28,6 +28,17 @@ const baseURL = process.env.APP_URL || "http://127.0.0.1:8000";
       await page.waitForFunction(() => !document.getElementById("example").disabled);
       assert.equal(await page.evaluate(() => window.geoCalls), 0, "Pas de géolocalisation au chargement");
       assert.equal(await page.locator('input[name="origin-type"]:checked').inputValue(), "site");
+      // Non-régression : ajout via le formulaire (materials.js) doit activer #compare.
+      assert.equal(await page.locator("#compare").isDisabled(), true);
+      await page.fill("#quantity", "2");
+      await page.click("#add-form button");
+      assert.equal(await page.locator("#cart-body tr").count(), 1);
+      assert.equal(await page.locator("#compare").isDisabled(), false);
+      await page.click("#compare");
+      await page.locator("#results-section:not([hidden])").waitFor();
+      assert.equal(await page.locator(".result-card").count(), 3);
+      await page.locator(".remove").click();
+      assert.equal(await page.locator("#compare").isDisabled(), true);
       await page.click("#example");
       await page.click("#compare");
       await page.locator("#results-section:not([hidden])").waitFor();
