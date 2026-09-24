@@ -6,6 +6,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    JSON,
     Numeric,
     String,
     Text,
@@ -54,6 +55,12 @@ class Chantier(Timestamps, Base):
         passive_deletes=True,
         order_by="ChantierMaterial.ordre",
     )
+    approvisionnement: Mapped["ApprovisionnementRetenu | None"] = relationship(
+        back_populates="chantier",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
 
 
 class ChantierMaterial(Base):
@@ -93,3 +100,35 @@ class ChantierMaterial(Base):
     @property
     def product_category(self) -> str:
         return self.produit.category
+
+
+class ApprovisionnementRetenu(Timestamps, Base):
+    """Snapshot commercial d'une stratégie de comparaison retenue pour un chantier."""
+
+    __tablename__ = "approvisionnements_retenus"
+    __table_args__ = (
+        UniqueConstraint("chantier_id", name="uq_appro_chantier"),
+        CheckConstraint(
+            "strategy_key IN ('single_stop', 'minimum_materials', 'best_compromise')",
+            name="ck_appro_strategy_key",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chantier_id: Mapped[int] = mapped_column(
+        ForeignKey("chantiers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    strategy_key: Mapped[str] = mapped_column(String(32))
+    strategy_title: Mapped[str] = mapped_column(String(200))
+    chosen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    # Empreinte des besoins au moment du choix (product_id:quantite triés).
+    needs_fingerprint: Mapped[str] = mapped_column(String(4000))
+    currency: Mapped[str] = mapped_column(String(3), default="EUR")
+    tax_basis: Mapped[str] = mapped_column(String(8), default="HT")
+    material_total: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    estimated_procurement_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    total_distance_km: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    travel_minutes: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    # JSON : strategy + origin + cost_parameters (valeurs snapshotées).
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    chantier: Mapped[Chantier] = relationship(back_populates="approvisionnement")

@@ -70,6 +70,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "longitude": settings.user_longitude,
                 "site_address": settings.site_address,
                 "company_address": settings.company_address,
+                "company_latitude": settings.company_latitude,
+                "company_longitude": settings.company_longitude,
                 "demo_addresses": list(FakeGeocodingService.ADDRESSES),
             },
         )

@@ -115,5 +115,48 @@
     </button>
   </div>
 </section>
+<section
+  id="approvisionnement-section"
+  class="workspace form-panel approvisionnement-panel"
+  aria-labelledby="appro-title"
+>
+  <div class="section-heading">
+    <h2 id="appro-title">Approvisionnement retenu</h2>
+  </div>
+  <div id="appro-empty" class="empty" hidden>
+    <strong>Aucune solution d’approvisionnement retenue.</strong>
+    <p>Comparez les prix depuis ce chantier pour en choisir une.</p>
+  </div>
+  <div id="appro-content" hidden></div>
+  <p id="appro-obsolete" class="status error" hidden>
+    Les besoins du chantier ont changé depuis le choix de cet
+    approvisionnement. Une nouvelle comparaison est recommandée.
+  </p>
+  <div id="appro-actions" class="form-actions" hidden>
+    <button type="button" class="button secondary" id="appro-recompare">
+      Refaire une comparaison
+    </button>
+    <button type="button" class="button danger-outline" id="appro-clear">
+      Retirer ce choix
+    </button>
+  </div>
+</section>
+<section id="delete-chantier-panel" class="workspace form-panel delete-panel" hidden>
+  <h2>Supprimer le chantier</h2>
+  <div id="delete-chantier-message" class="delete-message"></div>
+  <div class="form-actions">
+    <button type="button" class="button secondary" id="delete-chantier-cancel">
+      Annuler
+    </button>
+    <button type="button" class="button danger" id="delete-chantier-confirm">
+      Supprimer
+    </button>
+  </div>
+</section>
+<div class="detail-danger-zone">
+  <button type="button" class="button danger-outline" id="delete-chantier">
+    Supprimer le chantier
+  </button>
+</div>
 <p id="status" class="status" role="status" aria-live="polite">Chargement…</p>
 {% endblock %}

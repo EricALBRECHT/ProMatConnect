@@ -357,13 +357,15 @@ def test_create_all_is_additive_on_preexisting_schema(database_url):
         Base.metadata.create_all(engine)
         event.remove(engine, "before_cursor_execute", capture)
         assert snapshot() == before
-        assert {"chantiers", "chantier_materials"} <= set(inspect(engine).get_table_names())
+        assert {"chantiers", "chantier_materials", "approvisionnements_retenus"} <= set(
+            inspect(engine).get_table_names()
+        )
         ddl = [
             s.strip().upper()
             for s in statements
             if s.strip().upper().startswith(("CREATE TABLE", "ALTER", "DROP"))
         ]
-        assert len(ddl) == 2
+        assert len(ddl) == 3
         assert all(s.startswith("CREATE TABLE") for s in ddl)
     finally:
         engine.dispose()

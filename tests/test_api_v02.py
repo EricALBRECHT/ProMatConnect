@@ -126,7 +126,11 @@ def test_swagger_v02(client):
     schema = client.get("/openapi.json").json()
     assert schema["info"]["version"] == "0.2.0"
     assert "origin" in schema["components"]["schemas"]["CompareRequest"]["properties"]
-    assert (
-        "estimated_procurement_cost"
-        in schema["components"]["schemas"]["ProcurementStrategy"]["properties"]
+    schemas = schema["components"]["schemas"]
+    strategy = (
+        schemas.get("ProcurementStrategy")
+        or schemas.get("ProcurementStrategy-Output")
+        or schemas.get("ProcurementStrategy-Input")
     )
+    assert strategy is not None
+    assert "estimated_procurement_cost" in strategy["properties"]

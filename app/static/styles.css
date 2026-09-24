@@ -465,6 +465,78 @@ td small {
   font-size: 13px;
   font-weight: 650;
 }
+.detail-danger-zone {
+  margin: 24px 0 8px;
+  display: flex;
+  justify-content: flex-start;
+}
+.button.danger,
+.button.danger-outline {
+  min-height: 44px;
+}
+.button.danger {
+  background: #a33930;
+  color: #fff;
+  border: 1px solid #a33930;
+}
+.button.danger-outline {
+  background: transparent;
+  color: #a33930;
+  border: 1px solid #a33930;
+}
+.button.danger:hover,
+.button.danger-outline:hover {
+  filter: brightness(0.95);
+}
+.approvisionnement-panel .section-heading {
+  padding: 0 0 12px;
+  border: 0;
+}
+.appro-summary {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.appro-lines {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+.appro-line {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.appro-line:first-child {
+  border-top: 0;
+}
+.delete-panel,
+.choice-confirm-panel {
+  margin-top: 16px;
+}
+.choice-confirm-panel {
+  max-width: 640px;
+}
+.strategy-choose {
+  margin-top: 16px;
+}
+.result-card .strategy-choose .button {
+  width: 100%;
+  min-height: 44px;
+}
+
+.cart-secondary-actions .button {
+  min-height: 44px;
+}
+.save-as-panel {
+  margin-top: 24px;
+}
+.save-as-panel .section-heading {
+  padding: 0 0 16px;
+  border: 0;
+}
+.save-as-panel .stacked-form {
+  padding: 0;
+}
 .cart-footer {
   display: flex;
   justify-content: space-between;
@@ -761,6 +833,16 @@ footer a {
   }
   .cart-footer .button {
     width: 100%;
+  }
+  .cart-secondary-actions {
+    padding: 16px;
+    flex-direction: column;
+  }
+  .cart-secondary-actions .button {
+    width: 100%;
+  }
+  .save-as-panel {
+    margin-top: 16px;
   }
   .metrics {
     grid-template-columns: 1fr 1fr;

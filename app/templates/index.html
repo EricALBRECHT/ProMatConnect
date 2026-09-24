@@ -157,6 +157,26 @@
       Charger le panier d’exemple →
     </button>
   </div>
+  <div class="cart-secondary-actions">
+    <button
+      id="save-as-chantier"
+      type="button"
+      class="button secondary"
+      hidden
+      disabled
+    >
+      Enregistrer comme chantier
+    </button>
+    <button
+      id="update-chantier"
+      type="button"
+      class="button secondary"
+      hidden
+      disabled
+    >
+      Mettre à jour le chantier
+    </button>
+  </div>
   <div class="cart-footer">
     <p>Prix en € HT · Conditionnements pris en compte</p>
     <button id="compare" class="button primary" type="button" disabled>
@@ -164,7 +184,72 @@
     </button>
   </div>
 </section>
+<section
+  id="save-as-chantier-panel"
+  class="workspace form-panel save-as-panel"
+  hidden
+  aria-labelledby="save-as-title"
+>
+  <div class="section-heading">
+    <h2 id="save-as-title">Enregistrer comme chantier</h2>
+    <span class="muted">À partir de votre liste actuelle</span>
+  </div>
+  <form id="save-as-chantier-form" class="stacked-form" novalidate>
+    <div>
+      <label for="save-as-nom">Nom du chantier *</label>
+      <input id="save-as-nom" name="nom" required maxlength="200" autocomplete="off" />
+    </div>
+    <div>
+      <label for="save-as-client">Client</label>
+      <input
+        id="save-as-client"
+        name="client"
+        maxlength="200"
+        autocomplete="organization"
+      />
+    </div>
+    <div>
+      <label for="save-as-adresse">Adresse *</label>
+      <input
+        id="save-as-adresse"
+        name="adresse"
+        required
+        maxlength="300"
+        autocomplete="street-address"
+      />
+    </div>
+    <div>
+      <label for="save-as-date">Date prévue</label>
+      <input id="save-as-date" name="date_prevue" type="date" />
+    </div>
+    <div>
+      <label for="save-as-notes">Notes</label>
+      <textarea id="save-as-notes" name="notes" rows="3" maxlength="10000"></textarea>
+    </div>
+    <input type="hidden" id="save-as-latitude" name="latitude" value="" />
+    <input type="hidden" id="save-as-longitude" name="longitude" value="" />
+    <p class="form-hint muted">
+      Les matériaux et quantités du comparateur seront enregistrés. Les prix et
+      résultats de comparaison ne sont pas conservés.
+    </p>
+    <div class="form-actions">
+      <button type="button" id="save-as-cancel" class="button secondary">
+        Annuler
+      </button>
+      <button type="submit" id="save-as-submit" class="button primary">
+        Créer le chantier
+      </button>
+    </div>
+  </form>
+</section>
 <p id="status" class="status" role="status" aria-live="polite"></p>
+<div
+  id="comparator-meta"
+  hidden
+  data-company-address="{{ company_address }}"
+  data-company-latitude="{{ company_latitude }}"
+  data-company-longitude="{{ company_longitude }}"
+></div>
 <section id="results-section" aria-labelledby="results-title" hidden>
   <div class="section-heading">
     <div>
@@ -175,6 +260,22 @@
   </div>
   <div id="decision-summary" class="decision-summary" hidden></div>
   <div id="results" class="results"></div>
+  <section
+    id="choice-confirm-panel"
+    class="workspace form-panel choice-confirm-panel"
+    hidden
+  >
+    <h2 id="choice-confirm-title">Retenir cette solution ?</h2>
+    <div id="choice-confirm-body"></div>
+    <div class="form-actions">
+      <button type="button" class="button secondary" id="choice-confirm-cancel">
+        Annuler
+      </button>
+      <button type="button" class="button primary" id="choice-confirm-submit">
+        Confirmer
+      </button>
+    </div>
+  </section>
   <details class="legacy-results">
     <summary>Retrouver la comparaison par enseigne (V0.1)</summary>
     <div id="legacy-results"></div>

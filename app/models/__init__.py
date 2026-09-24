@@ -100,6 +100,6 @@ class Offer(Timestamps, Base):
     preparation_minutes: Mapped[int] = mapped_column(Integer)
 
 
-# Imports après Product/Timestamps : enregistrent les tables additionnelles dans Base.metadata.
+from app.models.chantier import ApprovisionnementRetenu as ApprovisionnementRetenu  # noqa: E402
 from app.models.chantier import Chantier as Chantier  # noqa: E402
 from app.models.chantier import ChantierMaterial as ChantierMaterial  # noqa: E402

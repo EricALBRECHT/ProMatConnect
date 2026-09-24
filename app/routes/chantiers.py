@@ -5,7 +5,9 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import AwareDatetime
 
 from app.routes.api import SessionDependency
+from app.schemas.approvisionnement import ApprovisionnementRead, ApprovisionnementWrite
 from app.schemas.chantier import ChantierRead, ChantierUpdate, ChantierWrite
+from app.services.approvisionnement import ApprovisionnementService
 from app.services.chantiers import (
     ChantierConflict,
     ChantierNotFound,
@@ -61,4 +63,26 @@ def delete_chantier(
     updated_at: Annotated[AwareDatetime, Query(description="Jeton de la dernière lecture.")],
 ):
     execute(lambda: ChantierService(session).delete(chantier_id, updated_at))
+    return Response(status_code=204)
+
+
+@router.get("/{chantier_id}/approvisionnement", response_model=ApprovisionnementRead)
+def get_approvisionnement(chantier_id: int, session: SessionDependency):
+    return execute(lambda: ApprovisionnementService(session).get(chantier_id))
+
+
+@router.put("/{chantier_id}/approvisionnement", response_model=ApprovisionnementRead)
+def put_approvisionnement(
+    chantier_id: int, payload: ApprovisionnementWrite, session: SessionDependency
+):
+    return execute(lambda: ApprovisionnementService(session).upsert(chantier_id, payload))
+
+
+@router.delete("/{chantier_id}/approvisionnement", status_code=204)
+def delete_approvisionnement(
+    chantier_id: int,
+    session: SessionDependency,
+    updated_at: Annotated[AwareDatetime, Query(description="Jeton de la dernière lecture.")],
+):
+    execute(lambda: ApprovisionnementService(session).delete(chantier_id, updated_at))
     return Response(status_code=204)
