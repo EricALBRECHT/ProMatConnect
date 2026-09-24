@@ -53,7 +53,8 @@ def test_detail_page_for_existing_and_missing_chantier(client):
     assert "Matériaux" in page.text
     assert "Enregistrer" in page.text
     assert "Comparer les prix" in page.text
-    assert 'id="compare-prices"' in page.text and "disabled" in page.text
+    assert 'id="compare-prices"' in page.text
+    assert "Bientôt" not in page.text
     assert client.get("/chantiers/99999").status_code == 404
 
 
@@ -160,4 +161,50 @@ def test_compare_button_resyncs_after_materials_js_cart_change():
     finally_block = app_js.split("} finally {", 1)[1].split("});", 1)[0]
     assert "syncCompareButton()" in finally_block
     detail = Path("app/templates/chantier_detail.html").read_text(encoding="utf-8")
-    assert 'id="compare-prices"' in detail and "disabled" in detail
+    assert 'id="compare-prices"' in detail
+    assert "Bientôt" not in detail
+
+
+def test_quantity_inputs_use_step_one_and_keep_decimal_rules():
+    materials = Path("app/static/materials.js").read_text(encoding="utf-8")
+    assert "function configureQuantityInput" in materials
+    assert 'input.step = "1"' in materials
+    assert 'step: "0.001"' not in materials
+    assert "function parseQuantity" in materials
+    assert "function reportQuantityFields" in materials
+    assert 'replace(",", ".")' in materials
+    # Sans min HTML : avec min=0.001 + step=1, les flèches feraient 2→2.001.
+    assert "input.removeAttribute(\"min\")" in materials
+    index = Path("app/templates/index.html").read_text(encoding="utf-8")
+    detail = Path("app/templates/chantier_detail.html").read_text(encoding="utf-8")
+    assert 'id="quantity"' in index and 'step="1"' in index
+    assert 'id="quantity"' in detail and 'step="1"' in detail
+    assert "reportQuantityFields" in Path("app/static/app.js").read_text(encoding="utf-8")
+    assert "reportQuantityFields" in Path("app/static/chantiers.js").read_text(encoding="utf-8")
+
+    # Miroir des règles parseQuantity (backend inchangé : 3 décimales, > 0).
+    def parse_quantity(raw: str):
+        normalized = raw.strip().replace(",", ".")
+        if not normalized:
+            return False
+        try:
+            value = float(normalized)
+        except ValueError:
+            return False
+        if not (0.001 <= value <= 1000000):
+            return False
+        fraction = normalized.split(".")[1] if "." in normalized else ""
+        return len(fraction) <= 3
+
+    for raw, ok in [
+        ("2", True),
+        ("2.5", True),
+        ("2.25", True),
+        ("2.002", True),
+        ("2,5", True),
+        ("0.0001", False),
+        ("0", False),
+        ("1000001", False),
+        ("2.0001", False),
+    ]:
+        assert parse_quantity(raw) is ok, raw

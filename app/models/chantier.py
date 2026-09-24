@@ -81,3 +81,15 @@ class ChantierMaterial(Base):
     @property
     def unite(self) -> str:
         return self.produit.reference_unit
+
+    @property
+    def product_name(self) -> str:
+        return self.produit.name
+
+    @property
+    def product_code(self) -> str:
+        return self.produit.code
+
+    @property
+    def product_category(self) -> str:
+        return self.produit.category

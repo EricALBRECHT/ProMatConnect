@@ -58,6 +58,70 @@ window.ProMatMaterials = (() => {
     return fallback;
   }
 
+  function parseQuantity(raw) {
+    const normalized = String(raw ?? "")
+      .trim()
+      .replace(",", ".");
+    if (!normalized) return { ok: false, reason: "empty" };
+    const value = Number(normalized);
+    if (!Number.isFinite(value)) return { ok: false, reason: "nan" };
+    if (value < 0.001 || value > 1000000) return { ok: false, reason: "range" };
+    const fraction = normalized.includes(".") ? normalized.split(".")[1] : "";
+    if (fraction.length > 3) return { ok: false, reason: "decimals" };
+    return { ok: true, value, text: normalized };
+  }
+
+  /**
+   * step=1 : flèches natives ±1.
+   * min HTML absent : avec min=0.001 et step=1, 2→2.001 (base de pas).
+   * Le plancher métier 0.001 reste contrôlé dans reportQuantityValidity.
+   */
+  function configureQuantityInput(input, { value, ariaLabel } = {}) {
+    input.type = "number";
+    input.removeAttribute("min");
+    input.max = "1000000";
+    input.step = "1";
+    input.required = true;
+    if (value !== undefined) input.value = value;
+    if (ariaLabel) input.setAttribute("aria-label", ariaLabel);
+    return input;
+  }
+
+  function reportQuantityValidity(input) {
+    const parsed = parseQuantity(input.value);
+    if (!parsed.ok) {
+      const messages = {
+        empty: "Renseignez une quantité.",
+        nan: "Indiquez une quantité numérique valide.",
+        range: "Indiquez une quantité entre 0,001 et 1 000 000.",
+        decimals: "Trois décimales maximum.",
+      };
+      input.setCustomValidity(messages[parsed.reason] || messages.nan);
+      const ok = input.reportValidity();
+      input.setCustomValidity("");
+      return ok;
+    }
+    input.setCustomValidity("");
+    // Harmonise une éventuelle virgule collée hors type=number.
+    if (String(input.value).includes(",")) input.value = parsed.text;
+    // step=1 pilote les flèches ; "any" évite le rejet HTML des décimales saisies.
+    const previousStep = input.step;
+    input.step = "any";
+    const ok = input.reportValidity();
+    input.step = previousStep;
+    return ok;
+  }
+
+  function reportQuantityFields(container) {
+    const inputs = container.querySelectorAll(
+      'input.line-quantity, input#quantity, input[type="number"].line-quantity',
+    );
+    for (const input of inputs) {
+      if (!reportQuantityValidity(input)) return false;
+    }
+    return true;
+  }
+
   /**
    * Liste de matériaux partagée (comparateur et chantiers).
    * lines : [{ product_id, quantity }] avec quantity en chaîne.
@@ -84,6 +148,8 @@ window.ProMatMaterials = (() => {
     const empty = $(emptyId);
     const count = $(countId);
 
+    if (quantityInput) configureQuantityInput(quantityInput);
+
     function renderProducts() {
       fillProductSelect(productSelect, getProducts(), search.value);
     }
@@ -99,16 +165,10 @@ window.ProMatMaterials = (() => {
         const name = node("td", product.name);
         name.append(node("small", `${product.code} · ${product.category}`));
         const quantityCell = node("td");
-        const input = node("input", undefined, "line-quantity");
-        Object.assign(input, {
-          type: "number",
-          min: "0.001",
-          max: "1000000",
-          step: "0.001",
+        const input = configureQuantityInput(node("input", undefined, "line-quantity"), {
           value: line.quantity,
-          required: true,
+          ariaLabel: `Quantité pour ${product.name}`,
         });
-        input.setAttribute("aria-label", `Quantité pour ${product.name}`);
         input.addEventListener("input", () => {
           line.quantity = input.value;
           onChange();
@@ -141,7 +201,9 @@ window.ProMatMaterials = (() => {
       event.preventDefault();
       const id = Number(productSelect.value);
       if (!id) return;
-      const quantity = Number(quantityInput.value);
+      if (!reportQuantityValidity(quantityInput)) return;
+      const parsed = parseQuantity(quantityInput.value);
+      const quantity = parsed.value;
       const lines = getLines();
       const existing = lines.find((line) => line.product_id === id);
       if (existing) {
@@ -155,7 +217,10 @@ window.ProMatMaterials = (() => {
         }
         existing.quantity = String(combined);
       } else {
-        setLines([...lines, { product_id: id, quantity: String(quantity) }]);
+        setLines([
+          ...lines,
+          { product_id: id, quantity: String(quantity) },
+        ]);
       }
       onChange();
       renderLines();
@@ -171,6 +236,10 @@ window.ProMatMaterials = (() => {
     fillProductSelect,
     fetchProducts,
     apiErrorMessage,
+    parseQuantity,
+    configureQuantityInput,
+    reportQuantityValidity,
+    reportQuantityFields,
     bindMaterialLines,
   };
 })();

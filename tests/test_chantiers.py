@@ -66,6 +66,8 @@ def test_create_full_chantier_and_read(client):
     assert [m["product_id"] for m in data["materiaux"]] == [2, 1]
     assert Decimal(data["materiaux"][0]["quantite"]) == Decimal("10.125")
     assert data["materiaux"][1]["unite"] == "plaque"
+    assert data["materiaux"][1]["product_code"] == "PMC0001"
+    assert data["materiaux"][1]["product_name"]
     assert all(m["chantier_id"] == data["id"] for m in data["materiaux"])
     assert data["created_at"].endswith("Z") and data["updated_at"].endswith("Z")
     assert client.get(f"/api/chantiers/{data['id']}").json() == data

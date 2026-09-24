@@ -6,6 +6,7 @@ const {
   fetchProducts,
   bindMaterialLines,
   apiErrorMessage,
+  reportQuantityFields,
 } = window.ProMatMaterials;
 
 const CONFLICT_MESSAGE =
@@ -145,6 +146,7 @@ async function setupDetail(chantierId) {
   let products = [];
   let lines = [];
   let dirty = false;
+  let saving = false;
 
   function markDirty() {
     dirty = true;
@@ -167,13 +169,10 @@ async function setupDetail(chantierId) {
   $("date_prevue").addEventListener("input", markDirty);
   $("notes").addEventListener("input", markDirty);
 
-  $("save-button").addEventListener("click", async () => {
-    if (!$("chantier-form").reportValidity()) return;
-    for (const input of $("cart-body").querySelectorAll("input")) {
-      if (!input.reportValidity()) return;
-    }
-    const button = $("save-button");
-    button.disabled = true;
+  async function saveChantier({ quiet = false } = {}) {
+    if (!$("chantier-form").reportValidity()) return false;
+    if (!reportQuantityFields($("cart-body"))) return false;
+    saving = true;
     status("Enregistrement…");
     try {
       const body = {
@@ -193,7 +192,7 @@ async function setupDetail(chantierId) {
       const payload = await response.json().catch(() => ({}));
       if (response.status === 409) {
         status(CONFLICT_MESSAGE, true);
-        return;
+        return false;
       }
       if (!response.ok) {
         throw new Error(
@@ -207,11 +206,43 @@ async function setupDetail(chantierId) {
       }));
       materialList.renderLines();
       dirty = false;
-      status("Chantier enregistré.");
+      if (!quiet) status("Chantier enregistré.");
+      return true;
     } catch (error) {
       status(error.message || "Connexion impossible. Réessayez.", true);
+      return false;
+    } finally {
+      saving = false;
+    }
+  }
+
+  $("save-button").addEventListener("click", async () => {
+    const button = $("save-button");
+    button.disabled = true;
+    $("compare-prices").disabled = true;
+    try {
+      await saveChantier();
     } finally {
       button.disabled = false;
+      $("compare-prices").disabled = false;
+    }
+  });
+
+  $("compare-prices").addEventListener("click", async () => {
+    if (saving) return;
+    const button = $("compare-prices");
+    const saveButton = $("save-button");
+    button.disabled = true;
+    saveButton.disabled = true;
+    try {
+      if (dirty) {
+        const saved = await saveChantier({ quiet: true });
+        if (!saved) return;
+      }
+      window.location.assign(`/?chantier_id=${chantierId}`);
+    } finally {
+      button.disabled = false;
+      saveButton.disabled = false;
     }
   });
 
@@ -223,6 +254,7 @@ async function setupDetail(chantierId) {
     products = catalog;
     if (response.status === 404) {
       status("Chantier introuvable.", true);
+      $("compare-prices").disabled = true;
       return;
     }
     if (!response.ok) throw new Error("Impossible de charger ce chantier.");
@@ -238,6 +270,7 @@ async function setupDetail(chantierId) {
     status();
   } catch (error) {
     status(error.message || "Connexion impossible. Réessayez.", true);
+    $("compare-prices").disabled = true;
   }
 
   window.addEventListener("beforeunload", (event) => {

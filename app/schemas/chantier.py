@@ -63,6 +63,9 @@ class ChantierMaterialRead(BaseModel):
     id: int
     chantier_id: int
     product_id: int
+    product_name: str
+    product_code: str
+    product_category: str
     quantite: Decimal
     unite: str
     ordre: int

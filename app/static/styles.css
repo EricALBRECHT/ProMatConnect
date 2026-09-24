@@ -295,6 +295,27 @@ h2 {
   font-size: 13px;
   margin: 25px 0;
 }
+.chantier-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  margin: 0 0 20px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.chantier-banner p {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.chantier-banner .text-button {
+  padding: 4px 0;
+}
 .notice span {
   margin-right: 9px;
   color: var(--green);

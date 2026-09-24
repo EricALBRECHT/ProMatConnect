@@ -7,6 +7,7 @@ const {
   fillProductSelect,
   bindMaterialLines,
   apiErrorMessage,
+  reportQuantityFields,
 } = window.ProMatMaterials;
 
 const money = (value) =>
@@ -19,6 +20,9 @@ const number = (value) =>
 let products = [];
 let cart = [];
 let revision = 0;
+/** Coordonnées du chantier chargé ; null si adresse seule ou édition manuelle. */
+let siteCoordinates = null;
+let siteAddressNeedsConfirmation = false;
 
 function status(message = "", error = false) {
   $("status").textContent = message;
@@ -34,6 +38,132 @@ function invalidate() {
 function syncCompareButton() {
   // Historique : le panier non vide active le bouton ; l'origine se valide au clic.
   $("compare").disabled = cart.length === 0;
+}
+
+function normalizeAddress(address) {
+  return String(address || "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function demoAddresses() {
+  return [...document.querySelectorAll("#demo-addresses option")].map(
+    (option) => option.value,
+  );
+}
+
+function isKnownDemoAddress(address) {
+  const needle = normalizeAddress(address);
+  return demoAddresses().some((item) => normalizeAddress(item) === needle);
+}
+
+function mergeProductsFromChantier(materiaux) {
+  const byId = new Map(products.map((product) => [product.id, product]));
+  materiaux.forEach((line) => {
+    if (byId.has(line.product_id)) return;
+    // Produit hors première page / filtre courant : conserver depuis l'API chantier.
+    byId.set(line.product_id, {
+      id: line.product_id,
+      code: line.product_code,
+      name: line.product_name,
+      category: line.product_category,
+      reference_unit: line.unite,
+      description: null,
+    });
+  });
+  products = [...byId.values()];
+}
+
+function showChantierBanner(chantier) {
+  const banner = $("chantier-banner");
+  if (!banner) return;
+  $("chantier-banner-name").textContent = chantier.nom;
+  $("chantier-banner-link").href = `/chantiers/${chantier.id}`;
+  banner.hidden = false;
+}
+
+function hideChantierBanner() {
+  const banner = $("chantier-banner");
+  if (banner) banner.hidden = true;
+}
+
+function applySiteOriginFromChantier(chantier) {
+  const siteRadio = document.querySelector('input[name="origin-type"][value="site"]');
+  if (siteRadio && !siteRadio.checked) {
+    siteRadio.checked = true;
+    siteRadio.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  $("origin-address").value = chantier.adresse || "";
+  savedAddresses.site = $("origin-address").value;
+  previousOriginType = "site";
+  const hasCoords =
+    chantier.latitude !== null &&
+    chantier.latitude !== undefined &&
+    chantier.longitude !== null &&
+    chantier.longitude !== undefined;
+  if (hasCoords) {
+    siteCoordinates = {
+      latitude: Number(chantier.latitude),
+      longitude: Number(chantier.longitude),
+    };
+    siteAddressNeedsConfirmation = false;
+    return;
+  }
+  siteCoordinates = null;
+  siteAddressNeedsConfirmation = !isKnownDemoAddress(chantier.adresse || "");
+}
+
+async function loadChantierFromQuery() {
+  const raw = new URLSearchParams(window.location.search).get("chantier_id");
+  if (raw === null) return;
+  if (!/^\d+$/.test(raw) || Number(raw) < 1) {
+    hideChantierBanner();
+    status("Le chantier demandé est introuvable.", true);
+    return;
+  }
+  const chantierId = Number(raw);
+  status("Chargement du chantier…");
+  try {
+    const response = await fetch(`/api/chantiers/${chantierId}`);
+    if (response.status === 404) {
+      hideChantierBanner();
+      cart = [];
+      siteCoordinates = null;
+      siteAddressNeedsConfirmation = false;
+      invalidate();
+      renderCart();
+      status("Le chantier demandé est introuvable.", true);
+      return;
+    }
+    if (!response.ok) throw new Error("Impossible de charger ce chantier.");
+    const chantier = await response.json();
+    mergeProductsFromChantier(chantier.materiaux || []);
+    cart = (chantier.materiaux || []).map((line) => ({
+      product_id: line.product_id,
+      quantity: String(line.quantite),
+    }));
+    applySiteOriginFromChantier(chantier);
+    showChantierBanner(chantier);
+    invalidate();
+    renderProducts();
+    renderCart();
+    if (siteAddressNeedsConfirmation) {
+      status(
+        "Adresse du chantier inconnue du géocodeur de démonstration. " +
+          "Choisissez une adresse de test proposée ou Ma position avant de comparer.",
+        true,
+      );
+    } else {
+      status(`Panier chargé depuis « ${chantier.nom} ».`);
+    }
+  } catch (error) {
+    hideChantierBanner();
+    status(error.message || "Connexion impossible. Réessayez.", true);
+  }
 }
 
 function getCart() {
@@ -336,7 +466,11 @@ document.querySelectorAll('input[name="origin-type"]').forEach((input) => {
   });
 });
 $("locate").addEventListener("click", requestPosition);
-$("origin-address").addEventListener("input", invalidate);
+$("origin-address").addEventListener("input", () => {
+  siteCoordinates = null;
+  siteAddressNeedsConfirmation = false;
+  invalidate();
+});
 
 function selectedOrigin() {
   const type = originType();
@@ -352,13 +486,27 @@ function selectedOrigin() {
     return { type, ...currentCoordinates };
   }
   if (!$("origin-address").reportValidity()) return null;
-  return { type, address: $("origin-address").value.trim() };
+  const address = $("origin-address").value.trim();
+  if (type === "site" && siteCoordinates) {
+    return {
+      type,
+      latitude: siteCoordinates.latitude,
+      longitude: siteCoordinates.longitude,
+    };
+  }
+  if (type === "site" && siteAddressNeedsConfirmation && !isKnownDemoAddress(address)) {
+    status(
+      "Adresse du chantier inconnue du géocodeur de démonstration. " +
+        "Choisissez une adresse de test proposée ou Ma position avant de comparer.",
+      true,
+    );
+    return null;
+  }
+  return { type, address };
 }
 
 $("compare").addEventListener("click", async () => {
-  for (const input of $("cart-body").querySelectorAll("input")) {
-    if (!input.reportValidity()) return;
-  }
+  if (!reportQuantityFields($("cart-body"))) return;
   if (!cart.length) return;
   const origin = selectedOrigin();
   if (!origin) return;
@@ -404,6 +552,7 @@ async function init() {
     $("example").disabled = !["PMC0001", "PMC0002", "PMC0003"].every((code) =>
       products.some((p) => p.code === code),
     );
+    await loadChantierFromQuery();
   } catch (error) {
     fillProductSelect($("product"), []);
     $("product").replaceChildren(node("option", "Catalogue indisponible"));

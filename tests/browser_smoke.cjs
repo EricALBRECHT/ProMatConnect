@@ -1,4 +1,5 @@
 // Vérification navigateur optionnelle, indépendante de pytest et du runtime applicatif.
+// Ne crée ni ne supprime aucun chantier (aucune mutation de données métier).
 const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 const path = require("node:path");
@@ -31,9 +32,20 @@ const baseURL = process.env.APP_URL || "http://127.0.0.1:8000";
       // Non-régression : ajout via le formulaire (materials.js) doit activer #compare.
       assert.equal(await page.locator("#compare").isDisabled(), true);
       await page.fill("#quantity", "2");
+      assert.equal(await page.locator("#quantity").getAttribute("step"), "1");
       await page.click("#add-form button");
       assert.equal(await page.locator("#cart-body tr").count(), 1);
       assert.equal(await page.locator("#compare").isDisabled(), false);
+      assert.equal(await page.locator(".line-quantity").getAttribute("step"), "1");
+      await page.locator(".line-quantity").evaluate((input) => {
+        input.stepUp();
+      });
+      assert.equal(await page.locator(".line-quantity").inputValue(), "3");
+      await page.locator(".line-quantity").evaluate((input) => {
+        input.stepDown();
+      });
+      assert.equal(await page.locator(".line-quantity").inputValue(), "2");
+      await page.locator(".line-quantity").fill("2.25");
       await page.click("#compare");
       await page.locator("#results-section:not([hidden])").waitFor();
       assert.equal(await page.locator(".result-card").count(), 3);
