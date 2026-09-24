@@ -142,9 +142,11 @@ def test_empty_chantier_list_message_and_assets(client):
 
 
 def test_comparator_assets_still_load_shared_materials(client):
+    from app.version import APP_VERSION
+
     home = client.get("/").text
-    assert "/static/materials.js" in home
-    assert "/static/app.js" in home
+    assert f"/static/materials.js?v={APP_VERSION}" in home
+    assert f"/static/app.js?v={APP_VERSION}" in home
     assert client.get("/static/app.js").status_code == 200
 
 

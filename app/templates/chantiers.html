@@ -2,8 +2,8 @@
 {% block title %}ProMatConnect — Mes chantiers{% endblock %}
 {% block description %}Retrouvez et ouvrez vos chantiers enregistrés.{% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', path='/materials.js') }}" defer></script>
-<script src="{{ url_for('static', path='/chantiers.js') }}" defer></script>
+<script src="{{ static_asset('materials.js') }}" defer></script>
+<script src="{{ static_asset('chantiers.js') }}" defer></script>
 {% endblock %}
 {% block content %}
 <section class="page-header" data-page="chantiers-list">

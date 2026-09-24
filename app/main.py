@@ -15,10 +15,16 @@ from app.routes.api import router
 from app.routes.chantiers import router as chantiers_router
 from app.services.chantiers import ChantierNotFound, ChantierService
 from app.services.geocoding import FakeGeocodingService
+from app.version import APP_VERSION
 from scripts.seed import seed
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).parent
+
+
+def _static_asset(path: str) -> str:
+    """URL locale versionnée (?v=APP_VERSION) pour invalider le cache navigateur à chaque release."""
+    return f"/static/{path.lstrip('/')}?v={APP_VERSION}"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -41,7 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application = FastAPI(
         title="ProMatConnect",
-        version="0.2.0",
+        version=APP_VERSION,
         lifespan=lifespan,
         description="Comparaison B2B de matériaux — données fictives uniquement, prix en EUR HT.",
     )
@@ -49,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(chantiers_router)
     application.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
     templates = Jinja2Templates(directory=ROOT / "templates")
+    templates.env.globals["static_asset"] = _static_asset
 
     @application.exception_handler(SQLAlchemyError)
     async def database_error(request: Request, exc: SQLAlchemyError):

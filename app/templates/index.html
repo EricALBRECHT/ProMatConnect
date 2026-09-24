@@ -2,8 +2,8 @@
 {% block title %}ProMatConnect — Comparateur de matériaux{% endblock %}
 {% block description %}Préparez votre panier de matériaux et comparez les fournisseurs simulés.{% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', path='/materials.js') }}" defer></script>
-<script src="{{ url_for('static', path='/app.js') }}" defer></script>
+<script src="{{ static_asset('materials.js') }}" defer></script>
+<script src="{{ static_asset('app.js') }}" defer></script>
 {% endblock %}
 {% block content %}
 <section class="intro">
