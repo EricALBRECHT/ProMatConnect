@@ -30,13 +30,21 @@ class ShoppingListLine(BaseModel):
     purchased_quantity: Decimal
     packs: int
     pack_size: Decimal | None = None
+    packaging_quantity: Decimal | None = None
+    reference_quantity: Decimal | None = None
     pack_price: Decimal
     line_total: Decimal
     preparation_minutes: int | None = None
     available_quantity: Decimal | None = None
-    # pack_price = prix HT d'un pack (supplier_unit) ; packs = nombre de packs.
+    # pack_price = prix d'un pack (supplier_unit) ; packs = nombre de packs.
     price_unit_label: str = "pack"
+    image_url: str | None = None
     suivi: ShoppingLineTracking = Field(default_factory=ShoppingLineTracking)
+    # Snapshot fiscal — optionnel (snapshots anciens).
+    tax_basis: str | None = None
+    source_price: Decimal | None = None
+    source_tax_basis: str | None = None
+    vat_rate: Decimal | None = None
 
 
 class ShoppingListStore(BaseModel):

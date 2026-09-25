@@ -11,16 +11,27 @@ from typing import BinaryIO
 
 from app.connectors.base import ConnectorHealth, ConnectorOffer, SupplierConnector
 from app.connectors.normalized import NormalizedAgency, NormalizedOffer, NormalizedSupplierProduct
+from app.connectors.url_safety import sanitize_http_url
+from app.services.tax import parse_vat_rate, validate_vat_rate
 
+# price n'est plus obligatoire : une ligne sans prix reste une référence catalogue.
+# agency_external_id doit être présent en en-tête mais peut être vide
+# (catalogue national / public sans magasin).
 REQUIRED_COLUMNS = (
     "supplier",
     "agency_external_id",
     "product_external_reference",
     "product_name",
-    "price",
     "currency",
     "tax_basis",
 )
+
+# Alias d'en-têtes acceptés → nom canonique v0.7
+HEADER_ALIASES = {
+    "supplier_reference": "product_external_reference",
+    "product_reference": "product_external_reference",
+    "external_reference": "product_external_reference",
+}
 
 OPTIONAL_COLUMNS = (
     "agency_name",
@@ -33,14 +44,22 @@ OPTIONAL_COLUMNS = (
     "ean",
     "supplier_unit",
     "packaging_quantity",
+    "reference_unit",
+    "reference_quantity",
     "available_quantity",
     "preparation_minutes",
     "observed_at",
     "product_code",
+    "price",
+    "source_url",
+    "seller",
+    "verification_status",
+    "image_url",
+    "vat_rate",
 )
 
 ALLOWED_CURRENCIES = frozenset({"EUR"})
-ALLOWED_TAX_BASIS = frozenset({"HT"})
+ALLOWED_TAX_BASIS = frozenset({"HT", "TTC"})
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 _SAFE_FILENAME = re.compile(r"^[\w.\- ()]+\.csv$", re.UNICODE)
 
@@ -59,6 +78,8 @@ class FileSupplierConnector(SupplierConnector):
     def __init__(self, offers: list[NormalizedOffer] | None = None, supplier_key: str = "file"):
         self._offers = list(offers or [])
         self._supplier_key = supplier_key
+        self._detected_columns: list[str] = []
+        self._delimiter: str = ","
 
     @property
     def connector_key(self) -> str:
@@ -81,7 +102,6 @@ class FileSupplierConnector(SupplierConnector):
         return "file"
 
     def get_offers(self, product_ids: list[int]) -> list[ConnectorOffer]:
-        # Le comparateur lit la base après import ; ce connecteur ne sert qu'à l'ingest.
         return []
 
     def health(self) -> ConnectorHealth:
@@ -90,7 +110,7 @@ class FileSupplierConnector(SupplierConnector):
             connector_key=self.connector_key,
             supplier_key=self.supplier_key,
             source_type=self.source_type,
-            detail=f"{len(self._offers)} offres normalisées en mémoire",
+            detail=f"{len(self._offers)} lignes normalisées en mémoire",
         )
 
     @property
@@ -142,11 +162,24 @@ class FileSupplierConnector(SupplierConnector):
                 [],
             )
 
-        reader = csv.DictReader(io.StringIO(text))
+        sample = text[:4096]
+        delimiter = ","
+        if sample.count(";") > sample.count(",") and "\n" in sample:
+            delimiter = ";"
+
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
         if reader.fieldnames is None:
             return cls(), [ImportIssue.make(0, "header", "En-tête CSV manquant.")], []
 
-        headers = [h.strip() for h in reader.fieldnames if h is not None]
+        raw_headers = [h.strip() for h in reader.fieldnames if h is not None and h.strip()]
+        headers = [HEADER_ALIASES.get(h, h) for h in raw_headers]
+        # Ré-applique les alias sur chaque ligne via fieldnames renommés.
+        if reader.fieldnames is not None:
+            reader.fieldnames = [
+                HEADER_ALIASES.get((h or "").strip(), (h or "").strip()) if h is not None else h
+                for h in reader.fieldnames
+            ]
+
         missing = [c for c in REQUIRED_COLUMNS if c not in headers]
         errors: list[dict] = []
         warnings: list[dict] = []
@@ -155,10 +188,14 @@ class FileSupplierConnector(SupplierConnector):
                 ImportIssue.make(
                     0,
                     "missing_columns",
-                    f"Colonnes obligatoires absentes : {', '.join(missing)}.",
+                    f"Colonnes obligatoires absentes : {', '.join(missing)}. "
+                    f"Colonnes détectées : {', '.join(raw_headers) or '(aucune)'}.",
                 )
             )
-            return cls(), errors, warnings
+            empty = cls()
+            empty._detected_columns = list(raw_headers)
+            empty._delimiter = delimiter
+            return empty, errors, warnings
 
         offers: list[NormalizedOffer] = []
         seen_keys: set[tuple[str, str, str]] = set()
@@ -167,7 +204,9 @@ class FileSupplierConnector(SupplierConnector):
         for line_no, row in enumerate(reader, start=2):
             if row is None:
                 continue
-            cleaned = { (k or "").strip(): (v.strip() if isinstance(v, str) else v) for k, v in row.items() }
+            cleaned = {
+                (k or "").strip(): (v.strip() if isinstance(v, str) else v) for k, v in row.items()
+            }
             if all(not (v or "").strip() for v in cleaned.values() if v is not None):
                 continue
 
@@ -178,7 +217,7 @@ class FileSupplierConnector(SupplierConnector):
                 continue
             key = (
                 offer.supplier,
-                offer.agency.external_id,
+                offer.agency.external_id or "",
                 offer.product.external_reference,
             )
             if key in seen_keys:
@@ -203,7 +242,10 @@ class FileSupplierConnector(SupplierConnector):
                     f"Plusieurs fournisseurs dans le fichier : {', '.join(sorted(suppliers))}.",
                 )
             )
-        return cls(offers, supplier_key=supplier_key), errors, warnings
+        connector = cls(offers, supplier_key=supplier_key)
+        connector._detected_columns = list(raw_headers)
+        connector._delimiter = delimiter
+        return connector, errors, warnings
 
     @classmethod
     def _parse_row(
@@ -221,12 +263,13 @@ class FileSupplierConnector(SupplierConnector):
             return value
 
         supplier = req("supplier")
-        agency_ext = req("agency_external_id")
+        # Catalogue national : agency_external_id peut être vide (pas d'agence magasin).
+        agency_ext = (row.get("agency_external_id") or "").strip()
         product_ref = req("product_external_reference")
         product_name = req("product_name")
-        price_raw = req("price")
         currency = req("currency").upper()
         tax_basis = req("tax_basis").upper()
+        price_raw = (row.get("price") or "").strip()
 
         price: Decimal | None = None
         if price_raw:
@@ -237,6 +280,14 @@ class FileSupplierConnector(SupplierConnector):
             else:
                 if price < 0:
                     errors.append(ImportIssue.make(line_no, "negative_price", "Prix négatif."))
+        else:
+            warnings.append(
+                ImportIssue.make(
+                    line_no,
+                    "missing_price",
+                    "Prix absent — référence catalogue sans offre active.",
+                )
+            )
 
         if currency and currency not in ALLOWED_CURRENCIES:
             errors.append(
@@ -251,9 +302,30 @@ class FileSupplierConnector(SupplierConnector):
                 ImportIssue.make(
                     line_no,
                     "invalid_tax_basis",
-                    f"Base fiscale invalide : {tax_basis} (attendu HT).",
+                    f"Base fiscale invalide : {tax_basis} (attendu HT ou TTC).",
                 )
             )
+
+        vat_rate: Decimal | None = None
+        vat_raw = (row.get("vat_rate") or "").strip()
+        if vat_raw:
+            try:
+                vat_rate = parse_vat_rate(vat_raw)
+            except Exception:
+                errors.append(
+                    ImportIssue.make(line_no, "invalid_vat_rate", "vat_rate invalide.")
+                )
+                vat_rate = None
+            else:
+                if vat_rate is not None and not validate_vat_rate(vat_rate):
+                    errors.append(
+                        ImportIssue.make(
+                            line_no,
+                            "invalid_vat_rate",
+                            "vat_rate hors plage raisonnable (0–100).",
+                        )
+                    )
+                    vat_rate = None
 
         packaging: Decimal | None = None
         pack_raw = (row.get("packaging_quantity") or "").strip()
@@ -272,6 +344,23 @@ class FileSupplierConnector(SupplierConnector):
                     ImportIssue.make(line_no, "invalid_quantity", "packaging_quantity invalide.")
                 )
 
+        ref_qty: Decimal | None = None
+        ref_qty_raw = (row.get("reference_quantity") or "").strip()
+        if ref_qty_raw:
+            try:
+                ref_qty = Decimal(ref_qty_raw.replace(",", "."))
+                if ref_qty <= 0:
+                    errors.append(
+                        ImportIssue.make(
+                            line_no, "invalid_quantity", "reference_quantity doit être > 0."
+                        )
+                    )
+                    ref_qty = None
+            except InvalidOperation:
+                errors.append(
+                    ImportIssue.make(line_no, "invalid_quantity", "reference_quantity invalide.")
+                )
+
         available: Decimal | None = None
         avail_raw = (row.get("available_quantity") or "").strip()
         if avail_raw:
@@ -280,7 +369,9 @@ class FileSupplierConnector(SupplierConnector):
                 if available < 0:
                     errors.append(
                         ImportIssue.make(
-                            line_no, "invalid_quantity", "available_quantity ne peut pas être négative."
+                            line_no,
+                            "invalid_quantity",
+                            "available_quantity ne peut pas être négative.",
                         )
                     )
                     available = None
@@ -320,22 +411,85 @@ class FileSupplierConnector(SupplierConnector):
         if row.get("agency_longitude") and lon is None:
             errors.append(ImportIssue.make(line_no, "invalid_coord", "agency_longitude invalide."))
 
+        image_raw = (row.get("image_url") or "").strip()
+        image_url: str | None = None
+        if image_raw:
+            image_url = sanitize_http_url(image_raw)
+            if image_url is None:
+                warnings.append(
+                    ImportIssue.make(
+                        line_no,
+                        "invalid_image_url",
+                        "image_url ignorée (seuls http:// et https:// sont acceptés).",
+                    )
+                )
+
+        source_url_raw = (row.get("source_url") or "").strip()
+        source_url: str | None = None
+        if source_url_raw:
+            source_url = sanitize_http_url(source_url_raw)
+            if source_url is None:
+                warnings.append(
+                    ImportIssue.make(
+                        line_no,
+                        "invalid_source_url",
+                        "source_url ignorée (seuls http:// et https:// sont acceptés).",
+                    )
+                )
+
+        # Ossature / plaques : quantité = pièces ; dimensions techniques ≠ unité de besoin.
+        name_l = product_name.lower()
+        ref_unit_raw = (row.get("reference_unit") or "").strip().lower()
+        meter_units = {
+            "m",
+            "ml",
+            "mètre",
+            "metre",
+            "mètres",
+            "metres",
+        }
+        area_units = {"m2", "m²", "m^2", "metre2", "mètre2"}
+        if any(token in name_l for token in ("rail", "montant", "fourrure")) and ref_unit_raw in meter_units:
+            errors.append(
+                ImportIssue.make(
+                    line_no,
+                    "ossature_unit_mismatch",
+                    "Ossature (rail/montant/fourrure) : reference_unit=m incorrect — "
+                    "non importable. Corriger en reference_unit=pièce (ou piece) et "
+                    "reference_quantity = nombre de pièces par conditionnement "
+                    "(ex. lot de 10 → packaging_quantity=10, reference_quantity=10). "
+                    "La longueur reste une caractéristique technique (length_mm).",
+                )
+            )
+        if "plaque" in name_l and ref_unit_raw in area_units:
+            errors.append(
+                ImportIssue.make(
+                    line_no,
+                    "plaque_unit_mismatch",
+                    "Plaque de plâtre : reference_unit=m² incorrect — non importable. "
+                    "Corriger en reference_unit=pièce et reference_quantity = nombre "
+                    "de plaques par conditionnement (souvent 1). "
+                    "La surface reste une caractéristique technique (surface_m2).",
+                )
+            )
+
         if errors:
             return errors, warnings, None
 
-        assert price is not None
         agency_name = (row.get("agency_name") or "").strip() or None
-        if not agency_name:
+        if agency_ext and not agency_name:
             warnings.append(
-                ImportIssue.make(line_no, "missing_agency_name", "agency_name absent — valeur dérivée.")
+                ImportIssue.make(
+                    line_no, "missing_agency_name", "agency_name absent — valeur dérivée."
+                )
             )
-        if lat is None or lon is None:
+        if agency_ext and (lat is None or lon is None):
             warnings.append(
                 ImportIssue.make(
                     line_no,
                     "missing_coords",
                     "Coordonnées d'agence absentes — agence non géolocalisée "
-                    "(offres importées mais exclues du comparateur distance/trajet).",
+                    "(prix matériaux comparables ; calculs distance/trajet exclus).",
                 )
             )
 
@@ -356,15 +510,22 @@ class FileSupplierConnector(SupplierConnector):
                 brand=(row.get("brand") or "").strip() or None,
                 supplier_unit=(row.get("supplier_unit") or "").strip() or None,
                 packaging_quantity=packaging,
+                reference_unit=(row.get("reference_unit") or "").strip() or None,
+                reference_quantity=ref_qty,
                 ean=(row.get("ean") or "").strip() or None,
                 product_code=(row.get("product_code") or "").strip() or None,
+                image_url=image_url,
             ),
             price=price,
             currency=currency,
             tax_basis=tax_basis,
+            vat_rate=vat_rate,
             available_quantity=available,
             preparation_minutes=prep,
             observed_at=observed,
+            source_url=source_url,
+            seller=(row.get("seller") or "").strip() or None,
+            verification_status=(row.get("verification_status") or "").strip() or None,
         )
         return errors, warnings, offer
 

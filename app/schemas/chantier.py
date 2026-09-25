@@ -113,6 +113,7 @@ class ChantierListItem(BaseModel):
     materiaux_count: int = Field(ge=0)
     approvisionnement_status: ApprovisionnementStatus
     material_total: Decimal | None = None
+    tax_basis: str | None = None
 
     @field_validator("created_at", "updated_at")
     @classmethod

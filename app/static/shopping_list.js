@@ -5,6 +5,7 @@
   if (!root) return;
 
   const chantierId = root.dataset.chantierId;
+  const taxBasis = root.dataset.taxBasis || "HT";
   const printBtn = document.getElementById("shopping-print");
   if (printBtn) {
     printBtn.addEventListener("click", () => window.print());
@@ -64,7 +65,7 @@
     if (q != null && p != null) {
       const sous = Math.round(q * p * 100) / 100;
       const ecart = Math.round((sous - planned) * 100) / 100;
-      if (sousTotalEl) sousTotalEl.textContent = `${money(sous)} HT`;
+      if (sousTotalEl) sousTotalEl.textContent = `${money(sous)} ${taxBasis}`;
       if (ecartEl) ecartEl.textContent = money(ecart);
     } else {
       if (sousTotalEl) sousTotalEl.textContent = "—";
@@ -95,7 +96,7 @@
     }
     material = Math.round(material * 100) / 100;
     const ecart = Math.round((material - planned) * 100) / 100;
-    if (mEl) mEl.textContent = `${money(material)} HT`;
+    if (mEl) mEl.textContent = `${money(material)} ${taxBasis}`;
     if (eEl) eEl.textContent = money(ecart);
   }
 

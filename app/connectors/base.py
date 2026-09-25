@@ -2,22 +2,43 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 
 class AgencyData(BaseModel):
+    """Agence magasin (coords) ou point national de catalogue (coords absentes)."""
+
     model_config = ConfigDict(frozen=True)
     id: int
     name: str
     address: str
     postal_code: str
     city: str
-    latitude: float = Field(ge=-90, le=90)
-    longitude: float = Field(ge=-180, le=180)
+    latitude: float | None = None
+    longitude: float | None = None
+
+    @model_validator(mode="after")
+    def _coords_bounds(self):
+        if self.latitude is not None and not (-90 <= self.latitude <= 90):
+            raise ValueError("latitude hors bornes")
+        if self.longitude is not None and not (-180 <= self.longitude <= 180):
+            raise ValueError("longitude hors bornes")
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude et longitude doivent être toutes deux renseignées ou absentes")
+        return self
+
+    @property
+    def is_geolocated(self) -> bool:
+        return self.latitude is not None and self.longitude is not None
 
 
 class ConnectorOffer(BaseModel):
-    """Prix HT et stock en conditionnements ; available_quantity en unités PMC."""
+    """Prix d'un conditionnement ; available_quantity en unités de référence PMC.
+
+    price = prix source fournisseur (jamais écrasé par une conversion).
+    tax_basis = HT | TTC de ce prix source.
+    vat_rate = taux % connu (None = pas de conversion vers l'autre base).
+    """
 
     model_config = ConfigDict(frozen=True)
     supplier: str
@@ -26,15 +47,29 @@ class ConnectorOffer(BaseModel):
     supplier_reference: str
     supplier_unit: str
     reference_quantity: Decimal = Field(gt=0)
+    reference_unit: str | None = None
+    packaging_quantity: Decimal = Field(default=Decimal("1"), gt=0)
     price: Decimal = Field(ge=0)
+    tax_basis: str = "HT"
+    vat_rate: Decimal | None = None
+    currency: str = "EUR"
     stock: int = Field(ge=0)
     preparation_minutes: int = Field(ge=0)
     updated_at: datetime
+    image_url: str | None = None
 
     @computed_field
     @property
     def available_quantity(self) -> Decimal:
+        # Catalogue national / prix sans stock magasin : stock 0 ≠ rupture.
+        if self.stock <= 0 and not self.agency.is_geolocated:
+            return Decimal("1000000")
         return self.reference_quantity * self.stock
+
+    def covers_packs(self, packs: int) -> bool:
+        if self.stock <= 0 and not self.agency.is_geolocated:
+            return True
+        return self.stock >= packs
 
 
 class ConnectorHealth(BaseModel):

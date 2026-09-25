@@ -36,6 +36,27 @@ const STALE_COMPARISON_MESSAGE =
 let comparisonFingerprint = null;
 let pendingChoice = null;
 
+const PRODUCT_PLACEHOLDER = "/static/product-placeholder.svg";
+/** Préférence unique de base de comparaison (alignée sur DEFAULT_COMPARE_TAX_BASIS serveur). */
+const DEFAULT_COMPARE_TAX_BASIS = "HT";
+let compareTaxBasis = DEFAULT_COMPARE_TAX_BASIS;
+
+function productThumb(url, name) {
+  const img = document.createElement("img");
+  img.className = "product-thumb";
+  img.width = 40;
+  img.height = 40;
+  img.loading = "lazy";
+  img.decoding = "async";
+  img.alt = name || "Produit";
+  img.src = url || PRODUCT_PLACEHOLDER;
+  img.addEventListener("error", () => {
+    img.onerror = null;
+    img.src = PRODUCT_PLACEHOLDER;
+  });
+  return img;
+}
+
 function status(message = "", error = false) {
   $("status").textContent = message;
   $("status").className = error ? "status error" : "status";
@@ -365,7 +386,7 @@ function exitChantierCompactMode() {
     compare.replaceChildren(document.createTextNode("Comparer mon panier "), arrow);
   }
   const note = $("compare-footer-note");
-  if (note) note.textContent = "Prix en € HT · Conditionnements pris en compte";
+  if (note) note.textContent = "Prix en € · Conditionnements pris en compte";
   document.body.classList.remove("comparator-chantier-mode");
   setOriginExpanded(true);
   setNeedsExpanded(true);
@@ -525,19 +546,46 @@ function renderStrategy(option) {
   }
   const agencies = node(
     "p",
-    option.stops.map((s) => `${s.name} (${s.supplier})`).join(" → "),
+    option.stops.map((s) => `${s.name} (${s.supplier})`).join(" → ") ||
+      "Catalogue national (sans magasin)",
     "selected-agencies",
   );
   card.append(agencies);
+  const taxLabel = lastComparison?.tax_basis || "HT";
   const price = node("p", money(option.material_total), "price");
-  price.append(node("small", " HT matériaux"));
+  price.append(node("small", ` ${taxLabel} matériaux`));
   card.append(price);
+  if (lastComparison?.tax_basis_note) {
+    card.append(node("p", lastComparison.tax_basis_note, "footnote"));
+  }
+  const hasRoute = Boolean(option.route && option.route.points && option.route.points.length);
+  const physicalStops = (option.stops || []).filter((s) => {
+    if (s.is_geolocated === false) return false;
+    if (s.is_geolocated === true) return true;
+    return s.distance_km != null;
+  });
+  const nationalOnly = !hasRoute && physicalStops.length === 0;
   const metrics = node("dl", undefined, "metrics metrics-compact");
-  [
-    ["Trajet", `${number(option.travel_minutes)} min`],
-    ["Distance", `${number(option.total_distance_km)} km`],
-    ["Arrêts", String(option.stops.length)],
-  ].forEach(([label, value]) => {
+  const metricRows = nationalOnly
+    ? [
+        ["Point de vente", "non géolocalisé"],
+        ["Trajet", "—"],
+        ["Distance", "—"],
+      ]
+    : [
+        [
+          "Trajet",
+          option.travel_minutes == null ? "—" : `${number(option.travel_minutes)} min`,
+        ],
+        [
+          "Distance",
+          option.total_distance_km == null
+            ? "—"
+            : `${number(option.total_distance_km)} km`,
+        ],
+        ["Arrêts", String(physicalStops.length)],
+      ];
+  metricRows.forEach(([label, value]) => {
     const group = node("div");
     group.append(node("dt", label), node("dd", value));
     metrics.append(group);
@@ -548,7 +596,7 @@ function renderStrategy(option) {
     estimated.append(
       node("span", "Total estimé"),
       node("strong", money(option.estimated_procurement_cost)),
-      node("small", "Indicateur · non facturé"),
+      node("small", `Indicateur · ${taxLabel} · non facturé`),
     );
     card.append(estimated);
   }
@@ -561,43 +609,62 @@ function renderStrategy(option) {
     actions.append(choose);
     card.append(actions);
   }
-  const route = node("details");
-  route.append(node("summary", "Itinéraire aller-retour"));
-  const itinerary = node("ol", undefined, "itinerary");
-  itinerary.append(node("li", option.route.points[0].label));
-  option.route.legs.forEach((leg) => {
-    const item = node("li");
-    item.append(
+  if (hasRoute) {
+    const route = node("details");
+    route.append(node("summary", "Itinéraire aller-retour"));
+    const itinerary = node("ol", undefined, "itinerary");
+    itinerary.append(node("li", option.route.points[0].label));
+    option.route.legs.forEach((leg) => {
+      const item = node("li");
+      item.append(
+        node(
+          "small",
+          `↓ ${number(leg.duration_minutes)} min — ${number(leg.distance_km)} km`,
+        ),
+        node("strong", leg.end.label),
+      );
+      itinerary.append(item);
+    });
+    route.append(
+      itinerary,
       node(
-        "small",
-        `↓ ${number(leg.duration_minutes)} min — ${number(leg.distance_km)} km`,
+        "p",
+        "Trajet routier simulé. Ordre optimisé pour la durée, puis la distance.",
+        "footnote",
       ),
-      node("strong", leg.end.label),
     );
-    itinerary.append(item);
-  });
-  route.append(
-    itinerary,
-    node(
-      "p",
-      "Trajet routier simulé. Ordre optimisé pour la durée, puis la distance.",
-      "footnote",
-    ),
-  );
-  card.append(route);
+    card.append(route);
+  } else {
+    card.append(
+      node(
+        "p",
+        "Pas de trajet calculé : offre catalogue national sans magasin géolocalisé. Comparaison limitée au prix matériaux.",
+        "footnote",
+      ),
+    );
+  }
   const calculation = node("details");
   calculation.append(node("summary", "Comprendre le calcul"));
   const breakdown = option.cost_breakdown;
   const parameters = lastComparison.cost_parameters;
-  [
+  const calcLines = [
     option.explanation,
-    `Matériaux : ${money(option.material_total)} HT`,
-    `Distance : ${number(option.total_distance_km)} km × ${money(parameters.cost_per_km)}/km = ${money(breakdown.distance_cost)}`,
-    `Temps : (${number(option.travel_minutes)} min de trajet + ${option.max_preparation_minutes} min de préparation) × ${money(parameters.time_value_per_hour)}/h ÷ 60 = ${money(breakdown.time_cost)}`,
-    `Arrêts supplémentaires : ${Math.max(option.stops.length - 1, 0)} × ${money(parameters.extra_stop_cost)} = ${money(breakdown.extra_stops_cost)}`,
-    `Temps total estimé : ${number(option.total_minutes)} min. Préparations parallèles, attendues avant le départ.`,
-    `Coût estimé : ${money(option.estimated_procurement_cost)}. Aucun montant de déplacement ou de temps n’est facturé par l’application.`,
-  ].forEach((text) => calculation.append(node("p", text)));
+    `Matériaux : ${money(option.material_total)} ${taxLabel}`,
+  ];
+  if (breakdown && parameters && option.total_distance_km != null) {
+    calcLines.push(
+      `Distance : ${number(option.total_distance_km)} km × ${money(parameters.cost_per_km)}/km = ${money(breakdown.distance_cost)}`,
+      `Temps : (${number(option.travel_minutes)} min de trajet + ${option.max_preparation_minutes} min de préparation) × ${money(parameters.time_value_per_hour)}/h ÷ 60 = ${money(breakdown.time_cost)}`,
+      `Arrêts supplémentaires : ${Math.max(physicalStops.length - 1, 0)} × ${money(parameters.extra_stop_cost)} = ${money(breakdown.extra_stops_cost)}`,
+      `Temps total estimé : ${number(option.total_minutes)} min. Préparations parallèles, attendues avant le départ.`,
+      `Coût estimé : ${money(option.estimated_procurement_cost)}. Aucun montant de déplacement ou de temps n’est facturé par l’application.`,
+    );
+  } else {
+    calcLines.push(
+      "Indicateur limité au prix matériaux (pas de coût de trajet pour cette solution).",
+    );
+  }
+  calcLines.forEach((text) => calculation.append(node("p", text)));
   card.append(calculation);
   const productsBlock = node("details");
   productsBlock.append(node("summary", "Matériaux par agence"));
@@ -609,25 +676,64 @@ function renderStrategy(option) {
     option.lines
       .filter((line) => line.agency_id === stop.id)
       .forEach((line) => {
-        const detail = node("div", undefined, "detail-line");
+        const detail = node("div", undefined, "detail-line detail-line-product");
+        const lineTax = line.tax_basis || taxLabel;
+        const refUnit = line.reference_unit || "pièce";
+        const supplierUnit = line.supplier_unit || "pack";
+        const packs = Number(line.packs) || 0;
+        const refPerPack = Number(
+          line.reference_quantity != null
+            ? line.reference_quantity
+            : packs > 0
+              ? Number(line.purchased_quantity) / packs
+              : 1,
+        );
+        const unitLabel = (n, unit) => {
+          if (n <= 1) return unit;
+          if (unit === "lot") return "lots";
+          if (unit === "plaque") return "plaques";
+          if (unit === "pièce") return "pièces";
+          if (unit === "piece") return "pieces";
+          return unit;
+        };
+        const purchase =
+          refPerPack === 1
+            ? `${packs} ${unitLabel(packs, supplierUnit)}`
+            : `${packs} ${unitLabel(packs, supplierUnit)} × ${number(refPerPack)} ${refUnit}`;
         detail.append(
+          productThumb(line.image_url, line.product_name),
           node("strong", line.product_name),
+          node("p", `Besoin : ${number(line.requested_quantity)} ${refUnit}`),
+          node("p", `Achat : ${purchase}`),
           node(
             "p",
-            `${number(line.requested_quantity)} ${line.reference_unit} demandés · ${money(line.line_total)} HT`,
+            `Quantité achetée : ${number(line.purchased_quantity)} ${refUnit}`,
           ),
           node(
             "p",
-            `${line.packs} × ${line.supplier_unit} à ${money(line.pack_price)} HT · ${number(line.purchased_quantity)} ${line.reference_unit} achetés`,
+            `${money(line.pack_price)} ${lineTax} / ${supplierUnit} · Total ${money(line.line_total)} ${lineTax}`,
           ),
+        );
+        if (line.source_price != null && line.source_tax_basis) {
+          detail.append(
+            node(
+              "p",
+              `Prix source : ${money(line.source_price)} ${line.source_tax_basis}${
+                line.vat_rate != null ? ` · TVA ${number(line.vat_rate)} %` : ""
+              }`,
+              "muted",
+            ),
+          );
+        }
+        detail.append(
           node("p", `${line.supplier} · réf. ${line.supplier_reference}`),
           node(
             "p",
-            `Stock : ${number(line.available_quantity)} ${line.reference_unit} · Préparation : ${line.preparation_minutes} min`,
+            `Stock : ${number(line.available_quantity)} ${refUnit} · Préparation : ${line.preparation_minutes} min`,
           ),
           node(
             "small",
-            `Offre fictive du ${new Date(line.updated_at).toLocaleDateString("fr-FR")}`,
+            `Offre du ${new Date(line.updated_at).toLocaleDateString("fr-FR")}`,
           ),
         );
         productsBlock.append(detail);
@@ -640,6 +746,13 @@ function renderStrategy(option) {
 let lastComparison = null;
 function renderComparison(data) {
   lastComparison = data;
+  const taxLabel = data.tax_basis || "HT";
+  const taxHint = $("results-tax-label");
+  if (taxHint) taxHint.textContent = `Prix simulés · EUR ${taxLabel}`;
+  const footerNote = $("compare-footer-note");
+  if (footerNote && !document.body.classList.contains("comparator-chantier-mode")) {
+    footerNote.textContent = `Prix en € ${taxLabel} · Conditionnements pris en compte`;
+  }
   $("results").replaceChildren(...data.strategies.map(renderStrategy));
   const delta = data.minimum_vs_single;
   const summary = $("decision-summary");
@@ -671,7 +784,7 @@ function renderComparison(data) {
       detail.append(
         node(
           "summary",
-          `${option.title} · ${option.valid ? money(option.total) + " HT" : "Panier incomplet"}`,
+          `${option.title} · ${option.valid ? money(option.total) + " " + taxLabel : "Panier incomplet"}`,
         ),
         node(
           "p",
@@ -682,14 +795,14 @@ function renderComparison(data) {
         detail.append(
           node(
             "p",
-            `Sous-total disponible : ${money(option.available_subtotal)} HT`,
+            `Sous-total disponible : ${money(option.available_subtotal)} ${taxLabel}`,
           ),
         );
       option.available.forEach((line) =>
         detail.append(
           node(
             "p",
-            `${line.product_name} · ${line.packs} × ${line.supplier_unit} · ${money(line.line_total)} HT · ${option.agencies.find((a) => a.id === line.agency_id).name}`,
+            `${line.product_name} · ${line.packs} × ${line.supplier_unit} · ${money(line.line_total)} ${line.tax_basis || taxLabel} · ${option.agencies.find((a) => a.id === line.agency_id).name}`,
           ),
         ),
       );
@@ -814,7 +927,11 @@ $("compare").addEventListener("click", async () => {
     const response = await fetch("/api/compare", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lines: cart, origin }),
+      body: JSON.stringify({
+        lines: cart,
+        origin,
+        tax_basis: compareTaxBasis,
+      }),
     });
     if (!response.ok) {
       const payload = await response.json();
@@ -843,6 +960,22 @@ $("compare").addEventListener("click", async () => {
   } finally {
     syncCompareButton();
   }
+});
+
+document.querySelectorAll(".tax-basis-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const next = btn.dataset.taxBasis;
+    if (next !== "HT" && next !== "TTC") return;
+    if (next === compareTaxBasis) return;
+    compareTaxBasis = next;
+    document.querySelectorAll(".tax-basis-btn").forEach((b) => {
+      b.classList.toggle("is-active", b.dataset.taxBasis === compareTaxBasis);
+    });
+    // Recalcule sans refaire la recherche panier : même lignes, même origine.
+    if (cart.length && !$("compare").disabled) {
+      $("compare").click();
+    }
+  });
 });
 
 $("origin-expand")?.addEventListener("click", () => setOriginExpanded(true));
@@ -882,19 +1015,24 @@ async function openChoiceConfirm(option) {
   body.replaceChildren();
   $("choice-confirm-title").textContent =
     `Confirmer cette solution pour « ${loadedChantier.nom} » ?`;
+  const taxLabel = lastComparison?.tax_basis || "HT";
   body.append(node("p", option.title, "choice-strategy"));
   if (agencies) body.append(node("p", agencies));
   if (option.estimated_procurement_cost != null) {
     body.append(
       node(
         "p",
-        `Total estimé : ${money(option.estimated_procurement_cost)} HT`,
+        `Total estimé : ${money(option.estimated_procurement_cost)} ${taxLabel}`,
         "choice-total",
       ),
     );
   } else if (option.material_total != null) {
     body.append(
-      node("p", `Matériaux : ${money(option.material_total)} HT`, "choice-total"),
+      node(
+        "p",
+        `Matériaux : ${money(option.material_total)} ${taxLabel}`,
+        "choice-total",
+      ),
     );
   }
   if (hasExisting) {

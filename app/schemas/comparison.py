@@ -17,6 +17,8 @@ class CompareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     lines: list[CartLine] = Field(min_length=1, max_length=100)
     origin: OriginRequest | None = None
+    # Base fiscale demandée ; si absente, déduite des offres (HT préféré si mixte).
+    tax_basis: str | None = Field(default=None, pattern="^(HT|TTC)$")
 
     @model_validator(mode="after")
     def no_duplicates(self):
@@ -33,7 +35,10 @@ class AgencyResult(BaseModel):
     address: str
     postal_code: str
     city: str
-    distance_km: float
+    # None = catalogue national / agence non géolocalisée (pas de distance fictive).
+    distance_km: float | None = None
+    # False pour catalogue national synthétique (ne compte pas comme arrêt physique).
+    is_geolocated: bool = True
 
 
 class SelectedLine(BaseModel):
@@ -52,6 +57,15 @@ class SelectedLine(BaseModel):
     available_quantity: Decimal
     preparation_minutes: int
     updated_at: datetime
+    tax_basis: str = "HT"
+    image_url: str | None = None
+    # Conditionnement historique (snapshot) : taille d'un pack vendu.
+    packaging_quantity: Decimal = Decimal("1")
+    reference_quantity: Decimal = Decimal("1")
+    # Prix source fournisseur (historique) — optionnel pour snapshots anciens.
+    source_price: Decimal | None = None
+    source_tax_basis: str | None = None
+    vat_rate: Decimal | None = None
 
 
 class UnavailableLine(BaseModel):
@@ -114,3 +128,6 @@ class ComparisonResponse(BaseModel):
     cost_parameters: CostParameters | None = None
     strategies: list[ProcurementStrategy] = Field(default_factory=list)
     minimum_vs_single: StrategyDelta | None = None
+    # Offres exclues car base fiscale incompatible avec le comparatif retenu.
+    excluded_incompatible_tax_basis: int = 0
+    tax_basis_note: str | None = None

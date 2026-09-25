@@ -9,6 +9,7 @@
   class="shopping-list"
   data-shopping-list
   data-chantier-id="{{ liste.chantier.id }}"
+  data-tax-basis="{{ liste.tax_basis or 'HT' }}"
   {% if liste.available %}data-line-count="{{ liste.line_count }}"{% endif %}
 >
   <header class="shopping-list-header print-keep">
@@ -158,7 +159,19 @@
           <label for="taken-{{ line.line_key|replace(':', '-') }}">Pris</label>
         </div>
         <div class="shopping-line-body">
-          <h3 class="shopping-product">{{ line.product_name }}</h3>
+          <div class="shopping-product-head">
+            <img
+              class="product-thumb"
+              src="{{ line.image_url or '/static/product-placeholder.svg' }}"
+              alt="{{ line.product_name }}"
+              width="48"
+              height="48"
+              loading="lazy"
+              decoding="async"
+              onerror="this.onerror=null;this.src='/static/product-placeholder.svg'"
+            />
+            <h3 class="shopping-product">{{ line.product_name }}</h3>
+          </div>
           {% if line.supplier_reference %}
           <p class="shopping-ref">Réf. fournisseur : {{ line.supplier_reference }}</p>
           {% endif %}
@@ -174,36 +187,51 @@
                 </dd>
               </div>
               <div>
-                <dt>À acheter</dt>
+                <dt>Achat</dt>
+                <dd>
+                  {% set ref_per_pack = line.reference_quantity if line.reference_quantity is not none else line.pack_size %}
+                  {% if ref_per_pack is not none and ref_per_pack != 1 %}
+                  {{ line.packs }}
+                  {% if line.packs > 1 %}
+                    {% if line.supplier_unit == "lot" %}lots{% elif line.supplier_unit == "plaque" %}plaques{% else %}{{ line.supplier_unit }}{% endif %}
+                  {% else %}
+                    {{ line.supplier_unit }}
+                  {% endif %}
+                  × {{ ref_per_pack|qty }}
+                  {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
+                  {% else %}
+                  {{ line.packs }}
+                  {% if line.packs > 1 and line.supplier_unit == "lot" %} lots
+                  {% elif line.packs > 1 and line.supplier_unit == "plaque" %} plaques
+                  {% else %} {{ line.supplier_unit }}{% endif %}
+                  {% endif %}
+                </dd>
+              </div>
+              <div>
+                <dt>Quantité achetée</dt>
                 <dd>
                   {{ line.purchased_quantity|qty }}
                   {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
                 </dd>
               </div>
-              {% if line.pack_size is not none %}
               <div>
-                <dt>Conditionnement</dt>
+                <dt>Prix / conditionnement</dt>
                 <dd>
-                  {{ line.pack_size|qty }}
-                  {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
+                  {{ line.pack_price|money }} {{ line.tax_basis or liste.tax_basis or "HT" }}
                   {% if line.supplier_unit %} / {{ line.supplier_unit }}{% endif %}
-                </dd>
-              </div>
-              {% endif %}
-              <div>
-                <dt>Nombre de paquets</dt>
-                <dd>{{ line.packs }}</dd>
-              </div>
-              <div>
-                <dt>Prix constaté</dt>
-                <dd>
-                  {{ line.pack_price|money }}
-                  {% if line.supplier_unit %} / {{ line.supplier_unit }}{% endif %}
+                  {% if line.source_price is not none and line.source_tax_basis
+                    and (line.source_tax_basis != (line.tax_basis or liste.tax_basis)) %}
+                  <div class="muted shopping-source-price">
+                    Prix source : {{ line.source_price|money }} {{ line.source_tax_basis }}{% if line.vat_rate is not none %} · TVA {{ line.vat_rate }} %{% endif %}
+                  </div>
+                  {% elif line.vat_rate is not none %}
+                  <div class="muted shopping-source-price">TVA {{ line.vat_rate }} %</div>
+                  {% endif %}
                 </dd>
               </div>
               <div class="shopping-line-total">
                 <dt>Sous-total prévu</dt>
-                <dd>{{ line.line_total|money }} HT</dd>
+                <dd>{{ line.line_total|money }} {{ line.tax_basis or liste.tax_basis or "HT" }}</dd>
               </div>
             </dl>
           </div>
@@ -270,7 +298,7 @@
                 <dt>Sous-total réel</dt>
                 <dd data-sous-total-reel>
                   {% if line.suivi.sous_total_reel is not none %}
-                  {{ line.suivi.sous_total_reel|money }} HT
+                  {{ line.suivi.sous_total_reel|money }} {{ liste.tax_basis or "HT" }}
                   {% else %}—{% endif %}
                 </dd>
               </div>
@@ -290,7 +318,7 @@
     </ul>
 
     <p class="shopping-store-subtotal">
-      Sous-total magasin (prévu) : <strong>{{ store.subtotal|money }} HT</strong>
+      Sous-total magasin (prévu) : <strong>{{ store.subtotal|money }} {{ liste.tax_basis or "HT" }}</strong>
     </p>
   </section>
   {% endfor %}
@@ -304,7 +332,7 @@
       {% if liste.totals.material_total is not none %}
       <div>
         <dt>Matériaux prévus</dt>
-        <dd>{{ liste.totals.material_total|money }} HT</dd>
+        <dd>{{ liste.totals.material_total|money }} {{ liste.tax_basis or "HT" }}</dd>
       </div>
       {% endif %}
       {% if liste.totals.distance_cost is not none %}
@@ -328,7 +356,7 @@
       {% if liste.totals.estimated_procurement_cost is not none %}
       <div class="shopping-grand-total">
         <dt>Total estimé</dt>
-        <dd>{{ liste.totals.estimated_procurement_cost|money }} HT</dd>
+        <dd>{{ liste.totals.estimated_procurement_cost|money }} {{ liste.tax_basis or "HT" }}</dd>
       </div>
       {% endif %}
     </dl>
@@ -349,7 +377,7 @@
         <dt>Matériaux réellement payés</dt>
         <dd data-actual-material>
           {% if liste.actual.material_total_renseigne is not none %}
-          {{ liste.actual.material_total_renseigne|money }} HT
+          {{ liste.actual.material_total_renseigne|money }} {{ liste.tax_basis or "HT" }}
           {% else %}—{% endif %}
         </dd>
       </div>

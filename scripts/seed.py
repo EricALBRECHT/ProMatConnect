@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.database import Base, make_engine
 from app.models import Agency, Offer, Product, Supplier, SupplierProduct
+from scripts.normalized_catalog import mark_demo_products_legacy, seed_normalized_catalog
 
 # nom, catégorie, unité PMC, prix de référence HT (chaînes -> Decimal uniquement)
 CATALOG = [
@@ -88,6 +89,7 @@ def seed(session: Session) -> None:
                     designation=f"{name} — gamme {'PPT' if supplier_index == 0 else 'GDT'}",
                     supplier_unit=unit if pack == 1 else f"lot de {pack} {unit}",
                     reference_quantity=Decimal(pack),
+                    packaging_quantity=Decimal("1"),
                     active=True,
                 )
                 session.add(sp)
@@ -147,6 +149,8 @@ def seed(session: Session) -> None:
                             updated_at=SNAPSHOT_DATE,
                         )
                     )
+    seed_normalized_catalog(session)
+    mark_demo_products_legacy(session)
     session.commit()
 
 

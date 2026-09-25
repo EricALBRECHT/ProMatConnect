@@ -20,8 +20,10 @@ def test_catalog_creation_read(session):
 
 
 def test_seed_counts(session):
+    from scripts.normalized_catalog import NORMALIZED_PRODUCT_COUNT
+
     for model, expected in [
-        (Product, 20),
+        (Product, 20 + NORMALIZED_PRODUCT_COUNT),
         (Supplier, 2),
         (Agency, 6),
         (SupplierProduct, 40),
@@ -51,10 +53,15 @@ def test_supplier_mapping(session):
 
 def test_search_and_pagination(session):
     repo = CatalogRepository(session)
-    assert len(repo.list("BA13")) == 1
-    assert len(repo.list("PMC0001")) == 1
+    legacy_ba13 = repo.list("PMC0001")
+    assert len(legacy_ba13) == 1
+    assert legacy_ba13[0].code == "PMC0001"
+    mapping = repo.list("BA13", for_mapping=True)
+    assert any(p.code == "PMC-BA13-STD-2500X1200" for p in mapping)
+    assert all(not p.is_legacy for p in mapping)
     assert repo.list("%") == []
-    assert repo.list(limit=2, offset=2)[0].code == "PMC0003"
+    page = repo.list(limit=2, offset=0, for_mapping=True)
+    assert len(page) == 2
 
 
 def test_decimal_prices(session):

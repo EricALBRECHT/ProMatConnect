@@ -28,8 +28,11 @@ class NormalizedSupplierProduct(BaseModel):
     brand: str | None = None
     supplier_unit: str | None = None
     packaging_quantity: Decimal | None = None
+    reference_unit: str | None = None
+    reference_quantity: Decimal | None = None
     ean: str | None = None
     product_code: str | None = None  # mapping explicite PMC (optionnel)
+    image_url: str | None = None  # http(s) uniquement
 
 
 class NormalizedOffer(BaseModel):
@@ -38,9 +41,14 @@ class NormalizedOffer(BaseModel):
     supplier: str
     agency: NormalizedAgency
     product: NormalizedSupplierProduct
-    price: Decimal = Field(ge=0)
+    # None = ligne catalogue sans prix (pas d'offre active).
+    price: Decimal | None = Field(default=None, ge=0)
     currency: str
     tax_basis: str
+    vat_rate: Decimal | None = None
     available_quantity: Decimal | None = None
     preparation_minutes: int | None = None
     observed_at: datetime | None = None
+    source_url: str | None = None
+    seller: str | None = None
+    verification_status: str | None = None

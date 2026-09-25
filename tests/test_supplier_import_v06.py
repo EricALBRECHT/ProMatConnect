@@ -30,8 +30,8 @@ def _csv(rows: str) -> bytes:
     return (VALID_HEADER + rows).encode("utf-8")
 
 
-def test_app_version_060():
-    assert APP_VERSION == "0.6.0"
+def test_app_version_070():
+    assert APP_VERSION == "0.8.0"
 
 
 def test_supplier_connector_interface(session):
@@ -93,9 +93,16 @@ def test_csv_invalid_currency():
 
 
 def test_csv_invalid_tax_basis():
-    raw = _csv("S,A1,REF1,Name,1,EUR,TTC\n")
+    raw = _csv("S,A1,REF1,Name,1,EUR,VAT\n")
     _c, errors, _w = FileSupplierConnector.parse_upload(raw, filename="bad.csv")
     assert any(e["code"] == "invalid_tax_basis" for e in errors)
+
+
+def test_csv_ttc_accepted():
+    raw = _csv("S,A1,REF1,Name,1.20,EUR,TTC\n")
+    connector, errors, _w = FileSupplierConnector.parse_upload(raw, filename="ttc.csv")
+    assert errors == []
+    assert connector.normalized_offers[0].tax_basis == "TTC"
 
 
 def test_csv_invalid_date():
@@ -231,13 +238,17 @@ def test_imported_offer_reaches_comparator(client, session):
     assert any(o.agency.name.startswith("POINT.P TEST · Import") for o in imported)
 
 
-def test_ungeolocated_agency_excluded_from_comparator(session):
-    """Agence sans coords : importée, mais hors comparateur (pas de fausse distance)."""
+def test_ungeolocated_agency_included_for_price_no_fake_distance(session):
+    """Agence sans coords : importée et visible pour le prix matériaux (pas de lat inventée)."""
     header = (
         "supplier,agency_external_id,agency_name,product_external_reference,product_name,"
-        "price,currency,tax_basis,product_code\n"
+        "price,currency,tax_basis,product_code,supplier_unit,packaging_quantity,"
+        "reference_unit,reference_quantity\n"
     )
-    row = "POINT.P TEST,PPT-NO-GEO,Sans coords,PPT-00137,Plaque,7.77,EUR,HT,PMC0001\n"
+    row = (
+        "POINT.P TEST,PPT-NO-GEO,Sans coords,PPT-00137,Plaque,"
+        "7.77,EUR,HT,PMC0001,plaque,1,plaque,1\n"
+    )
     service = SupplierImportService(session)
     result = service.import_file((header + row).encode(), "nogeo.csv")
     assert result.valid is True
@@ -245,8 +256,10 @@ def test_ungeolocated_agency_excluded_from_comparator(session):
     assert agency is not None
     assert agency.latitude is None and agency.longitude is None
     offers = OfferRepository(session).for_supplier("POINT.P TEST", [1])
-    assert all(o.price != Decimal("7.77") for o in offers)
-    assert all(o.agency.name != "Sans coords" for o in offers)
+    hit = [o for o in offers if o.price == Decimal("7.77")]
+    assert hit
+    assert hit[0].agency.latitude is None
+
 
 
 def test_admin_page(client):
@@ -261,6 +274,6 @@ def test_admin_page(client):
 
 def test_health_version_and_sources(client):
     body = client.get("/api/health").json()
-    assert body["version"] == "0.6.0"
+    assert body["version"] == "0.8.0"
     assert "demo" in body["data_sources"]
     assert "file" in body["data_sources"]

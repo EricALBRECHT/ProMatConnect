@@ -247,7 +247,16 @@
   </div>
 
   <div class="cart-footer">
-    <p id="compare-footer-note">Prix en € HT · Conditionnements pris en compte</p>
+    <div class="tax-basis-toggle" role="group" aria-label="Base de comparaison">
+      <span class="muted">Comparer en</span>
+      <button type="button" class="button secondary tax-basis-btn is-active" data-tax-basis="HT" id="tax-basis-ht">
+        HT
+      </button>
+      <button type="button" class="button secondary tax-basis-btn" data-tax-basis="TTC" id="tax-basis-ttc">
+        TTC
+      </button>
+    </div>
+    <p id="compare-footer-note">Prix en € · Conditionnements pris en compte</p>
     <button id="compare" class="button primary" type="button" disabled>
       Comparer mon panier <span aria-hidden="true">→</span>
     </button>
@@ -326,7 +335,7 @@
       <p class="eyebrow">VOTRE COMPARATIF</p>
       <h2 id="results-title">Les options pour votre panier</h2>
     </div>
-    <span class="muted">Prix simulés · EUR HT</span>
+    <span id="results-tax-label" class="muted">Prix simulés</span>
   </div>
   <div id="decision-summary" class="decision-summary" hidden></div>
   <div id="results" class="results"></div>
@@ -359,8 +368,8 @@
     <summary>Retrouver la comparaison par enseigne (V0.1)</summary>
     <div id="legacy-results"></div>
   </details>
-  <p class="footnote">
-    Prix des matériaux en € HT. Le coût estimé d’approvisionnement est un
+  <p class="footnote" id="compare-legal-footnote">
+    Prix des matériaux selon la base fiscale du comparatif (HT ou TTC). Le coût estimé d’approvisionnement est un
     indicateur d’aide au choix, jamais un prix facturé. La préparation maximale
     est attendue avant le départ, puis le trajet aller-retour est effectué : ces
     temps sont additionnés. Les distances et durées routières sont simulées,

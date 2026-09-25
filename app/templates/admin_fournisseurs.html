@@ -17,7 +17,7 @@
   <p class="admin-security" role="note">{{ security_note }}</p>
 
   <section class="admin-section">
-    <h2>Sources actives</h2>
+    <h2>Fournisseurs</h2>
     <ul class="admin-source-list">
       {% for source in sources %}
       <li>
@@ -32,9 +32,107 @@
         </div>
       </li>
       {% else %}
-      <li class="muted">Aucune source enregistrée.</li>
+      <li class="muted">Aucun fournisseur enregistré.</li>
       {% endfor %}
     </ul>
+  </section>
+
+  <section class="admin-section admin-catalogs-section">
+    <h2>Catalogues / imports</h2>
+    <div class="admin-table-wrap admin-catalogs-table-wrap">
+      <table class="admin-table admin-catalogs-table" id="catalog-table">
+        <thead>
+          <tr>
+            <th scope="col">Catalogue</th>
+            <th scope="col">Fournisseur</th>
+            <th scope="col">Date</th>
+            <th scope="col">HT/TTC</th>
+            <th scope="col">Offres</th>
+            <th scope="col">Non mappés</th>
+            <th scope="col">Statut</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cat in catalogs %}
+          <tr data-catalog-id="{{ cat.id }}">
+            <td class="admin-catalog-file">
+              <strong title="{{ cat.filename }}">{{ cat.filename }}</strong>
+              <div class="muted" title="{{ cat.source_key }}">{{ cat.source_key }}</div>
+            </td>
+            <td class="admin-catalog-suppliers" title="{{ cat.supplier_name or '' }}">{{ cat.supplier_name or "—" }}</td>
+            <td class="admin-catalog-date"{% if cat.created_at %} title="{{ cat.created_at }}"{% endif %}>{{ cat.created_at | datetime_short }}</td>
+            <td>{{ cat.tax_basis or "—" }}</td>
+            <td>{{ cat.offers }}</td>
+            <td>{{ cat.unmapped }}</td>
+            <td>{% if cat.active %}Actif{% else %}Inactif{% endif %}</td>
+            <td class="admin-row-actions">
+              <button type="button" class="button catalog-map" data-id="{{ cat.id }}">Mapper</button>
+              {% if cat.active %}
+              <button type="button" class="button secondary button-compact catalog-deactivate" data-id="{{ cat.id }}">Désactiver</button>
+              {% else %}
+              <button type="button" class="button secondary button-compact catalog-activate" data-id="{{ cat.id }}">Activer</button>
+              {% endif %}
+              {% if cat.can_delete %}
+              <button type="button" class="button danger button-compact catalog-delete" data-id="{{ cat.id }}" data-key="{{ cat.source_key }}">Supprimer</button>
+              {% else %}
+              <span class="muted admin-catalog-blocked" title="{{ cat.delete_blocked_reason or '' }}">Bloqué</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="8" class="muted">Aucun import pour le moment.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="catalog-cards" id="catalog-cards">
+      {% for cat in catalogs %}
+      <article class="catalog-card" data-catalog-id="{{ cat.id }}">
+        <header class="catalog-card-head">
+          <strong class="catalog-card-title" title="{{ cat.filename }}">{{ cat.filename }}</strong>
+          <span class="catalog-card-status{% if not cat.active %} is-inactive{% endif %}">{% if cat.active %}Actif{% else %}Inactif{% endif %}</span>
+        </header>
+        <p class="catalog-card-suppliers" title="{{ cat.supplier_name or '' }}">{{ cat.supplier_name or "—" }}</p>
+        <dl class="catalog-card-facts">
+          <div>
+            <dt>Date</dt>
+            <dd{% if cat.created_at %} title="{{ cat.created_at }}"{% endif %}>{{ cat.created_at | datetime_short }}</dd>
+          </div>
+          <div>
+            <dt>HT/TTC</dt>
+            <dd>{{ cat.tax_basis or "—" }}</dd>
+          </div>
+          <div>
+            <dt>Offres</dt>
+            <dd>{{ cat.offers }}</dd>
+          </div>
+          <div>
+            <dt>Non mappés</dt>
+            <dd>{{ cat.unmapped }}</dd>
+          </div>
+        </dl>
+        <div class="admin-row-actions catalog-card-actions">
+          <button type="button" class="button catalog-map" data-id="{{ cat.id }}">Mapper</button>
+          {% if cat.active %}
+          <button type="button" class="button secondary button-compact catalog-deactivate" data-id="{{ cat.id }}">Désactiver</button>
+          {% else %}
+          <button type="button" class="button secondary button-compact catalog-activate" data-id="{{ cat.id }}">Activer</button>
+          {% endif %}
+          {% if cat.can_delete %}
+          <button type="button" class="button danger button-compact catalog-delete" data-id="{{ cat.id }}" data-key="{{ cat.source_key }}">Supprimer</button>
+          {% else %}
+          <span class="muted admin-catalog-blocked" title="{{ cat.delete_blocked_reason or '' }}">Bloqué</span>
+          {% endif %}
+        </div>
+      </article>
+      {% else %}
+      <p class="muted">Aucun import pour le moment.</p>
+      {% endfor %}
+    </div>
   </section>
 
   <section class="admin-section">
@@ -56,36 +154,16 @@
     <div id="supplier-preview" class="admin-preview" hidden></div>
   </section>
 
-  <section class="admin-section">
-    <h2>Historique récent</h2>
-    <div class="admin-table-wrap">
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>Fichier</th>
-            <th>Fournisseur</th>
-            <th>Date</th>
-            <th>Lignes</th>
-            <th>Statut</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in history %}
-          <tr>
-            <td>{{ row.filename }}</td>
-            <td>{{ row.supplier_name }}</td>
-            <td>{{ row.created_at or "—" }}</td>
-            <td>{{ row.rows }}</td>
-            <td>{{ row.status }}</td>
-          </tr>
-          {% else %}
-          <tr>
-            <td colspan="5" class="muted">Aucun import pour le moment.</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+  <section class="admin-section" id="catalog-mapping-section" hidden>
+    <h2>Mappings du catalogue</h2>
+    <p class="muted" id="catalog-mapping-meta"></p>
+    <p class="admin-mapping-note" role="note">
+      Plusieurs références fournisseur peuvent pointer vers le même Product.
+      Aucune association n’est créée sans action explicite — les variantes
+      (BA13 hydrofuge / standard, rail 48 / 70, etc.) ne sont jamais proposées
+      comme équivalentes automatiquement.
+    </p>
+    <div id="catalog-mapping-panel"></div>
   </section>
 </section>
 {% endblock %}

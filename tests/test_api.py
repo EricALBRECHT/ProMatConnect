@@ -4,10 +4,17 @@ import pytest
 
 
 def test_catalog_api(client):
+    from scripts.normalized_catalog import NORMALIZED_PRODUCT_COUNT
+
     products = client.get("/api/products").json()
-    assert len(products) == 20
-    assert client.get("/api/products", params={"q": "BA13"}).json()[0]["code"] == "PMC0001"
-    assert client.get(f"/api/products/{products[0]['id']}").json() == products[0]
+    assert len(products) == 20 + NORMALIZED_PRODUCT_COUNT
+    mapping = client.get("/api/products", params={"q": "ba13", "for_mapping": True}).json()
+    assert mapping
+    assert mapping[0]["code"].startswith("PMC-BA13")
+    assert all(not p.get("is_legacy") for p in mapping)
+    legacy = client.get("/api/products", params={"q": "PMC0001"}).json()
+    assert legacy[0]["code"] == "PMC0001"
+    assert client.get(f"/api/products/{products[0]['id']}").json()["id"] == products[0]["id"]
     assert client.get("/api/products/9999").status_code == 404
 
 

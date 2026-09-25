@@ -176,6 +176,13 @@ def build_shopping_list_from_snapshot(
             product_id = int(raw["product_id"])
             key = make_line_key(agency_id, product_id)
             supplier_unit = raw.get("supplier_unit") or "pack"
+            pack_size = _pack_size(purchased, packs)
+            ref_qty = _dec(raw.get("reference_quantity"))
+            if ref_qty is None:
+                ref_qty = pack_size
+            pack_qty = _dec(raw.get("packaging_quantity"))
+            if pack_qty is None:
+                pack_qty = pack_size
             item = ShoppingListLine(
                 line_key=key,
                 agency_id=agency_id,
@@ -187,13 +194,20 @@ def build_shopping_list_from_snapshot(
                 requested_quantity=_dec(raw["requested_quantity"]) or Decimal("0"),
                 purchased_quantity=purchased,
                 packs=packs,
-                pack_size=_pack_size(purchased, packs),
+                pack_size=pack_size,
+                packaging_quantity=pack_qty,
+                reference_quantity=ref_qty,
                 pack_price=_dec(raw["pack_price"]) or Decimal("0.00"),
                 line_total=line_total,
                 preparation_minutes=raw.get("preparation_minutes"),
                 available_quantity=_dec(raw.get("available_quantity")),
                 price_unit_label=supplier_unit,
+                image_url=raw.get("image_url"),
                 suivi=_tracking_view(suivi_by_key.get(key), line_total),
+                tax_basis=raw.get("tax_basis"),
+                source_price=_dec(raw.get("source_price")),
+                source_tax_basis=raw.get("source_tax_basis"),
+                vat_rate=_dec(raw.get("vat_rate")),
             )
             store_lines.append(item)
             all_lines.append(item)

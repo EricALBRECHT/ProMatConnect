@@ -188,8 +188,9 @@ async function loadList() {
     const statusKey = chantier.approvisionnement_status || "none";
     body.append(statusBadge(statusKey));
     if (chantier.material_total != null && chantier.material_total !== "") {
+      const tax = chantier.tax_basis || "HT";
       body.append(
-        node("p", `${money(chantier.material_total)} HT`, "chantier-total"),
+        node("p", `${money(chantier.material_total)} ${tax}`, "chantier-total"),
       );
     }
     const open = node("span", "Ouvrir", "button secondary chantier-open");
@@ -428,9 +429,13 @@ async function setupDetail(chantierId) {
       );
     }
     const totals = node("dl", undefined, "appro-totals");
+    const taxLabel =
+      appro.tax_basis ||
+      (appro.snapshot && appro.snapshot.tax_basis) ||
+      "HT";
     const rows = [];
     if (appro.material_total != null) {
-      rows.push(["Matériaux", `${money(appro.material_total)}`]);
+      rows.push(["Matériaux", `${money(appro.material_total)} ${taxLabel}`]);
     }
     const distanceCost =
       strategy.cost_breakdown && strategy.cost_breakdown.distance_cost;
@@ -447,7 +452,10 @@ async function setupDetail(chantierId) {
       rows.push(["Trajet", parts.join(" · ")]);
     }
     if (appro.estimated_procurement_cost != null) {
-      rows.push(["Total estimé", money(appro.estimated_procurement_cost)]);
+      rows.push([
+        "Total estimé",
+        `${money(appro.estimated_procurement_cost)} ${taxLabel}`,
+      ]);
     }
     rows.forEach(([label, value]) => {
       const group = node("div");
@@ -460,13 +468,61 @@ async function setupDetail(chantierId) {
     linesBlock.append(node("h3", "Matériaux retenus"));
     (strategy.lines || []).forEach((line) => {
       const item = node("div", undefined, "appro-line");
-      item.append(
-        node(
-          "strong",
-          `${number(line.requested_quantity)} × ${line.product_name}`,
-        ),
-        node("p", `${money(line.line_total)} HT · ${line.supplier}`, "muted"),
+      const lineTax = line.tax_basis || taxLabel;
+      const refUnit = line.reference_unit || "pièce";
+      const supplierUnit = line.supplier_unit || "pack";
+      const packs = Number(line.packs) || 0;
+      const refPerPack = Number(
+        line.reference_quantity != null
+          ? line.reference_quantity
+          : packs > 0
+            ? Number(line.purchased_quantity) / packs
+            : 1,
       );
+      const unitLabel = (n, unit) => {
+        if (n <= 1) return unit;
+        if (unit === "lot") return "lots";
+        if (unit === "plaque") return "plaques";
+        if (unit === "pièce") return "pièces";
+        if (unit === "piece") return "pieces";
+        return unit;
+      };
+      let purchaseLabel;
+      if (refPerPack === 1) {
+        purchaseLabel = `${packs} ${unitLabel(packs, supplierUnit)}`;
+      } else {
+        purchaseLabel = `${packs} ${unitLabel(packs, supplierUnit)} × ${number(refPerPack)} ${refUnit}`;
+      }
+      item.append(node("strong", line.product_name));
+      const details = node("div", undefined, "appro-line-details muted");
+      details.append(
+        node("p", `Besoin : ${number(line.requested_quantity)} ${refUnit}`),
+        node("p", `Achat : ${purchaseLabel}`),
+        node(
+          "p",
+          `Quantité achetée : ${number(line.purchased_quantity)} ${refUnit}`,
+        ),
+        node(
+          "p",
+          `${money(line.pack_price)} ${lineTax} / ${supplierUnit}`,
+        ),
+        node(
+          "p",
+          `Total : ${money(line.line_total)} ${lineTax} · ${line.supplier}`,
+          "appro-line-total",
+        ),
+      );
+      if (line.source_price != null && line.source_tax_basis) {
+        details.append(
+          node(
+            "p",
+            `Prix source : ${money(line.source_price)} ${line.source_tax_basis}${
+              line.vat_rate != null ? ` · TVA ${number(line.vat_rate)} %` : ""
+            }`,
+          ),
+        );
+      }
+      item.append(details);
       linesBlock.append(item);
     });
     const shoppingLink = node("a", "Voir la liste d’achat", "button primary shopping-list-link");

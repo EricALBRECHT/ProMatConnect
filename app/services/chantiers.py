@@ -42,11 +42,13 @@ class ChantierService:
 
         status = "none"
         material_total = None
+        tax_basis = None
         appro = chantier.approvisionnement
         if appro is not None:
             current = materials_fingerprint(chantier.materiaux)
             status = "obsolete" if current != appro.needs_fingerprint else "retained"
             material_total = appro.material_total
+            tax_basis = appro.tax_basis
         return ChantierListItem(
             id=chantier.id,
             nom=chantier.nom,
@@ -58,6 +60,7 @@ class ChantierService:
             materiaux_count=len(chantier.materiaux),
             approvisionnement_status=status,
             material_total=material_total,
+            tax_basis=tax_basis,
         )
 
     def list(self, limit: int, offset: int) -> list[ChantierListItem]:

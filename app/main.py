@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -49,6 +50,21 @@ def _format_qty(value) -> str:
     return text.replace(".", ",")
 
 
+def _format_datetime_short(value) -> str:
+    """Affichage court FR (25/09/2026 18:08) — filtre template uniquement."""
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return text
+    return dt.strftime("%d/%m/%Y %H:%M")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
 
@@ -81,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     templates.env.globals["static_asset"] = _static_asset
     templates.env.filters["money"] = _format_money
     templates.env.filters["qty"] = _format_qty
+    templates.env.filters["datetime_short"] = _format_datetime_short
 
     @application.exception_handler(SQLAlchemyError)
     async def database_error(request: Request, exc: SQLAlchemyError):
@@ -159,26 +176,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with request.app.state.session_factory() as session:
             service = SupplierImportService(session)
             sources = service.list_sources()
-            history = [
-                {
-                    "filename": row.filename,
-                    "supplier_name": row.supplier_name,
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
-                    "rows": row.rows,
-                    "status": row.status,
-                    "mapped": row.mapped,
-                    "unmapped": row.unmapped,
-                    "source_key": row.source_key,
-                }
-                for row in service.list_imports()
-            ]
+            catalogs = service.list_catalogs()
         return templates.TemplateResponse(
             request=request,
             name="admin_fournisseurs.html",
             context={
                 "nav_active": "admin",
                 "sources": sources,
-                "history": history,
+                "catalogs": catalogs,
                 "app_version": APP_VERSION,
                 "security_note": (
                     "Page technique sans authentification — à protéger avant toute mise en production."

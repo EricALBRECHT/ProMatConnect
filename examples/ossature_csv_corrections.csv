@@ -1,0 +1,11 @@
+supplier,product_external_reference,product_name,brand,supplier_unit,packaging_quantity,reference_unit,reference_quantity,length_mm_note,product_code_cible,correction
+LEROY_MERLIN,85343284,Lot de 10 rails de 48 en 3 m NF,SEMIN,lot,10,pièce,10,3000 (technique Product),PMC-RAIL-R48-3000,"AVANT: pack=1 unit=m qty=30 → APRÈS: pack=10 unit=pièce qty=10"
+LEROY_MERLIN,85343291,Lot de 10 rails de 48 en 3 m NF,DECOZONE,lot,10,pièce,10,3000,PMC-RAIL-R48-3000,"AVANT: pack=1 unit=m qty=30 → APRÈS: pack=10 unit=pièce qty=10"
+BRICO_DEPOT,3760424120001,Lot de 10 rails R4830 NF 48x3000 mm,,lot,10,pièce,10,3000,PMC-RAIL-R48-3000,"AVANT: pack=1 unit=m qty=30 → APRÈS: pack=10 unit=pièce qty=10"
+LEROY_MERLIN,67532150,Rail de 70 mm long. 3 m,,piece,1,pièce,1,3000,PMC-RAIL-R70-3000,"AVANT: pack=1 unit=m qty=3 → APRÈS: pack=1 unit=pièce qty=1"
+LEROY_MERLIN,85343285,Lot de 10 montants 48/35 en 2,49 m NF,SEMIN,lot,10,pièce,10,2490,PMC-MONTANT-M48-2500,"AVANT: pack=1 unit=m qty=24.9 → APRÈS: pack=10 unit=pièce qty=10"
+BRICO_DEPOT,3760424120018,Lot de 10 montants M4835 NF 48x2490 mm,,lot,10,pièce,10,2490,PMC-MONTANT-M48-2500,"AVANT: pack=1 unit=m qty=24.9 → APRÈS: pack=10 unit=pièce qty=10"
+LEROY_MERLIN,67532115,Montant métallique 48/35 mm long. 3 m,SEMIN,piece,1,pièce,1,3000,PMC-MONTANT-M48-3000,"AVANT: pack=1 unit=m qty=3 + mauvais mapping Rail → APRÈS: pièce qty=1 vers Montant M48 3 m"
+LEROY_MERLIN,80134520,Montant 48/35 mm NF long. 3 m,,piece,1,pièce,1,3000,PMC-MONTANT-M48-3000,"AVANT: pack=1 unit=m qty=3 + mauvais mapping Rail → APRÈS: pièce qty=1 vers Montant M48 3 m"
+BRICO_DEPOT,3334160299712,Montant métallique acier galvanisé M48 2,50 m,,piece,1,pièce,1,2500,PMC-MONTANT-M48-2500,"AVANT: pack=1 unit=m qty=2.5 → APRÈS: pack=1 unit=pièce qty=1"
+BRICO_DEPOT,3760424120025,Lot de 10 fourrures F4518 45 mm x 300 cm,,lot,10,pièce,10,3000,PMC-FOURRURE-F45-3000,"AVANT: pack=1 unit=m qty=30 → APRÈS: pack=10 unit=pièce qty=10"

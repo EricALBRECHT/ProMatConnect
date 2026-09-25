@@ -101,8 +101,9 @@ def test_list_chantiers_paginated(client):
             "created_at": first["created_at"],
             "updated_at": first["updated_at"],
             "materiaux_count": len(first["materiaux"]),
-            "approvisionnement_status": "none",
-            "material_total": None,
+                "approvisionnement_status": "none",
+                "material_total": None,
+                "tax_basis": None,
         }
     ]
     assert client.get("/api/chantiers?limit=0").status_code == 422
