@@ -123,8 +123,10 @@ def test_geocoding_and_routing_can_be_replaced_without_changing_engine(client):
 
 
 def test_swagger_v02(client):
+    from app.version import APP_VERSION
+
     schema = client.get("/openapi.json").json()
-    assert schema["info"]["version"] == "0.2.0"
+    assert schema["info"]["version"] == APP_VERSION
     assert "origin" in schema["components"]["schemas"]["CompareRequest"]["properties"]
     schemas = schema["components"]["schemas"]
     strategy = (

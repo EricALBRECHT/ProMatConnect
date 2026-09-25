@@ -7,58 +7,97 @@
 {% endblock %}
 {% block content %}
 <section
-  class="page-header"
+  class="page-header detail-header"
   data-page="chantier-detail"
   data-chantier-id="{{ chantier.id }}"
 >
   <div>
     <p class="eyebrow">MES CHANTIERS</p>
     <h1 id="detail-title">{{ chantier.nom }}</h1>
-    <p class="lead">
-      Modifiez les informations et les matériaux, puis enregistrez.
-    </p>
   </div>
   <a class="text-button back-link" href="/chantiers">← Retour à la liste</a>
 </section>
-<section class="workspace form-panel">
-  <form id="chantier-form" class="stacked-form" novalidate>
-    <div>
-      <label for="nom">Nom du chantier *</label>
-      <input id="nom" name="nom" required maxlength="200" autocomplete="off" />
-    </div>
-    <div>
-      <label for="client">Client</label>
-      <input id="client" name="client" maxlength="200" autocomplete="organization" />
-    </div>
-    <div>
-      <label for="adresse">Adresse *</label>
-      <input
-        id="adresse"
-        name="adresse"
-        required
-        maxlength="300"
-        autocomplete="street-address"
-      />
-    </div>
-    <div>
-      <label for="date_prevue">Date prévue</label>
-      <input id="date_prevue" name="date_prevue" type="date" />
-    </div>
-    <div>
-      <label for="notes">Notes</label>
-      <textarea id="notes" name="notes" rows="4" maxlength="10000"></textarea>
-    </div>
-    <input type="hidden" id="latitude" name="latitude" />
-    <input type="hidden" id="longitude" name="longitude" />
-    <input type="hidden" id="updated_at" name="updated_at" />
-  </form>
+
+<section class="workspace form-panel identity-panel" aria-labelledby="identity-title">
+  <h2 id="identity-title" class="sr-only">Informations du chantier</h2>
+
+  <div id="identity-compact" class="identity-compact">
+    <p id="identity-compact-client" class="identity-compact-client"></p>
+    <p id="identity-compact-adresse" class="identity-compact-adresse"></p>
+    <p id="identity-compact-date" class="identity-compact-date muted"></p>
+    <p id="identity-compact-notes" class="identity-compact-notes muted" hidden></p>
+    <button type="button" class="button secondary" id="identity-edit">
+      Modifier les informations
+    </button>
+  </div>
+
+  <div id="identity-edit-panel" hidden>
+    <form id="chantier-form" class="stacked-form identity-form" novalidate>
+      <div>
+        <label for="nom">Nom du chantier *</label>
+        <input id="nom" name="nom" required maxlength="200" autocomplete="off" />
+      </div>
+      <div>
+        <label for="client">Client</label>
+        <input id="client" name="client" maxlength="200" autocomplete="organization" />
+      </div>
+      <div>
+        <label for="adresse">Adresse *</label>
+        <input
+          id="adresse"
+          name="adresse"
+          required
+          maxlength="300"
+          autocomplete="street-address"
+        />
+      </div>
+      <div>
+        <label for="date_prevue">Date prévue</label>
+        <input id="date_prevue" name="date_prevue" type="date" />
+      </div>
+      <div>
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="3" maxlength="10000"></textarea>
+      </div>
+      <input type="hidden" id="latitude" name="latitude" />
+      <input type="hidden" id="longitude" name="longitude" />
+      <input type="hidden" id="updated_at" name="updated_at" />
+      <div class="form-actions identity-edit-actions">
+        <button type="button" class="button secondary" id="identity-cancel">
+          Annuler
+        </button>
+        <button type="button" class="button primary" id="identity-save">
+          Enregistrer
+        </button>
+      </div>
+    </form>
+  </div>
 </section>
-<section class="workspace" aria-labelledby="materials-title">
+
+<section class="workspace needs-panel" aria-labelledby="needs-title">
   <div class="section-heading">
-    <h2 id="materials-title">Matériaux</h2>
+    <h2 id="needs-title">Besoins</h2>
     <span id="line-count" class="muted">0 produit</span>
   </div>
-  <form id="add-form" class="add-form">
+  <div class="table-wrap materials-stack">
+    <table>
+      <thead>
+        <tr>
+          <th>Produit</th>
+          <th>Quantité</th>
+          <th>Unité</th>
+          <th><span class="sr-only">Supprimer</span></th>
+        </tr>
+      </thead>
+      <tbody id="cart-body"></tbody>
+    </table>
+  </div>
+  <div id="empty-cart" class="empty">
+    <span aria-hidden="true">+</span>
+    <strong>Aucun matériau pour l’instant</strong>
+    <p>Ajoutez des produits du catalogue à ce chantier.</p>
+  </div>
+  <form id="add-form" class="add-form needs-add-form">
     <div class="search-field">
       <label for="search">Rechercher un matériau</label
       ><input
@@ -82,67 +121,55 @@
         required
       />
     </div>
-    <button type="submit" class="button secondary">+ Ajouter</button>
+    <button type="submit" class="button secondary">+ Ajouter un matériau</button>
   </form>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Produit</th>
-          <th>Quantité</th>
-          <th>Unité</th>
-          <th><span class="sr-only">Supprimer</span></th>
-        </tr>
-      </thead>
-      <tbody id="cart-body"></tbody>
-    </table>
-  </div>
-  <div id="empty-cart" class="empty">
-    <span aria-hidden="true">+</span>
-    <strong>Aucun matériau pour l’instant</strong>
-    <p>Ajoutez des produits du catalogue à ce chantier.</p>
-  </div>
-  <div class="cart-footer detail-actions">
-    <button
-      type="button"
-      class="button secondary"
-      id="compare-prices"
-    >
+  <div class="cart-footer detail-actions needs-actions">
+    <button type="button" class="button primary" id="compare-prices">
       Comparer les prix
     </button>
-    <button type="button" class="button primary" id="save-button">
-      Enregistrer
+    <button type="button" class="button secondary" id="save-button">
+      Enregistrer les besoins
     </button>
   </div>
 </section>
+
 <section
   id="approvisionnement-section"
   class="workspace form-panel approvisionnement-panel"
   aria-labelledby="appro-title"
 >
   <div class="section-heading">
-    <h2 id="appro-title">Approvisionnement retenu</h2>
+    <h2 id="appro-title">Approvisionnement</h2>
+    <span id="appro-badge" class="badge status-none" hidden>À comparer</span>
   </div>
   <div id="appro-empty" class="empty" hidden>
     <strong>Aucune solution d’approvisionnement retenue.</strong>
-    <p>Comparez les prix depuis ce chantier pour en choisir une.</p>
+    <p>Comparez les prix pour choisir une solution.</p>
+    <button type="button" class="button primary" id="appro-compare-empty">
+      Comparer les prix
+    </button>
   </div>
   <div id="appro-content" hidden></div>
-  <p id="appro-obsolete" class="status error" hidden>
-    Les besoins du chantier ont changé depuis le choix de cet
-    approvisionnement. Une nouvelle comparaison est recommandée.
+  <p id="appro-obsolete" class="status error appro-obsolete" hidden role="status">
+    Les besoins du chantier ont changé depuis cette comparaison.
   </p>
   <div id="appro-actions" class="form-actions" hidden>
-    <button type="button" class="button secondary" id="appro-recompare">
-      Refaire une comparaison
+    <button type="button" class="button primary" id="appro-recompare">
+      Refaire la comparaison
     </button>
-    <button type="button" class="button danger-outline" id="appro-clear">
+    <button type="button" class="text-button appro-clear-link" id="appro-clear">
       Retirer ce choix
     </button>
   </div>
 </section>
-<section id="delete-chantier-panel" class="workspace form-panel delete-panel" hidden>
-  <h2>Supprimer le chantier</h2>
+
+<section
+  id="delete-chantier-panel"
+  class="workspace form-panel delete-panel"
+  hidden
+  aria-labelledby="delete-confirm-title"
+>
+  <h2 id="delete-confirm-title">Confirmer la suppression</h2>
   <div id="delete-chantier-message" class="delete-message"></div>
   <div class="form-actions">
     <button type="button" class="button secondary" id="delete-chantier-cancel">
@@ -153,10 +180,14 @@
     </button>
   </div>
 </section>
-<div class="detail-danger-zone">
+
+<section class="danger-zone" aria-labelledby="danger-title">
+  <h2 id="danger-title">Zone dangereuse</h2>
+  <p>Supprimer définitivement ce chantier, ses matériaux et son approvisionnement retenu.</p>
   <button type="button" class="button danger-outline" id="delete-chantier">
     Supprimer le chantier
   </button>
-</div>
+</section>
+
 <p id="status" class="status" role="status" aria-live="polite">Chargement…</p>
 {% endblock %}

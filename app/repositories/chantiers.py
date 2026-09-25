@@ -16,7 +16,10 @@ class ChantierRepository:
     def _read_statement():
         return (
             select(Chantier)
-            .options(selectinload(Chantier.materiaux).selectinload(ChantierMaterial.produit))
+            .options(
+                selectinload(Chantier.materiaux).selectinload(ChantierMaterial.produit),
+                selectinload(Chantier.approvisionnement),
+            )
             .execution_options(populate_existing=True)
         )
 

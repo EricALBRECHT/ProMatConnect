@@ -35,7 +35,8 @@ def test_compare_prices_button_enabled_and_wiring(client):
 def test_comparator_page_has_chantier_banner_hooks(client):
     home = client.get("/").text
     assert 'id="chantier-banner"' in home
-    assert "Panier chargé depuis" in home
+    assert "Comparaison pour :" in home
+    assert "Panier chargé depuis" not in home
     assert 'id="chantier-banner-link"' in home
     assert "Retour au chantier" in home
     app_js = Path("app/static/app.js").read_text(encoding="utf-8")

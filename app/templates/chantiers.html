@@ -10,10 +10,29 @@
   <div>
     <p class="eyebrow">VOS CHANTIERS</p>
     <h1>Mes chantiers</h1>
-    <p class="lead">Retrouvez vos chantiers et ouvrez-en un pour le compléter.</p>
+    <p class="lead">Tableau de bord de vos chantiers et de leur approvisionnement.</p>
   </div>
   <a class="button primary" href="/chantiers/nouveau">+ Nouveau chantier</a>
 </section>
+<div class="list-toolbar" id="chantiers-toolbar" hidden>
+  <div class="list-search">
+    <label for="chantier-search">Rechercher un chantier</label>
+    <input
+      id="chantier-search"
+      type="search"
+      placeholder="Nom, client ou adresse…"
+      autocomplete="off"
+    />
+  </div>
+  <div class="list-sort">
+    <label for="chantier-sort">Trier par</label>
+    <select id="chantier-sort">
+      <option value="recent">Plus récents</option>
+      <option value="date">Date prévue</option>
+      <option value="name">Nom</option>
+    </select>
+  </div>
+</div>
 <p id="status" class="status" role="status" aria-live="polite">Chargement…</p>
 <div id="chantiers-empty" class="empty panel" hidden>
   <span aria-hidden="true">+</span>
@@ -21,5 +40,9 @@
   <p>Créez un premier chantier pour y associer vos matériaux.</p>
   <a class="button secondary" href="/chantiers/nouveau">+ Nouveau chantier</a>
 </div>
-<div id="chantiers-grid" class="chantier-grid" hidden></div>
+<div id="chantiers-none" class="empty panel" hidden>
+  <strong>Aucun chantier ne correspond</strong>
+  <p>Modifiez la recherche ou le tri pour afficher d’autres chantiers.</p>
+</div>
+<div id="chantiers-grid" class="chantier-grid" hidden role="list"></div>
 {% endblock %}

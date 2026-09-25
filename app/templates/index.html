@@ -6,7 +6,7 @@
 <script src="{{ static_asset('app.js') }}" defer></script>
 {% endblock %}
 {% block content %}
-<section class="intro">
+<section class="intro" id="comparator-intro">
   <div>
     <p class="eyebrow">VOS MATÉRIAUX, AU BON ENDROIT</p>
     <h1>Préparez votre liste<br />de matériaux</h1>
@@ -35,155 +35,225 @@
     </div>
   </aside>
 </section>
-<div class="notice">
+<div class="notice" id="comparator-notice">
   <span aria-hidden="true">i</span> Mode démonstration : fournisseurs, agences,
   prix, stocks et trajets simulés. Aucune commande réelle.
 </div>
-<div id="chantier-banner" class="chantier-banner" hidden>
-  <p>
-    Panier chargé depuis :
-    <strong id="chantier-banner-name"></strong>
-    <a id="chantier-banner-link" class="text-button" href="/chantiers">Retour au chantier</a>
-  </p>
-</div>
-<section class="origin-panel" aria-labelledby="origin-title">
-  <div class="section-heading">
-    <h2 id="origin-title">Point de départ</h2>
-    <span class="muted">Retour à ce point inclus</span>
+
+<section id="chantier-banner" class="chantier-context" hidden>
+  <div class="chantier-context-body">
+    <p class="eyebrow">Comparaison pour :</p>
+    <h1 id="chantier-banner-name"></h1>
+    <p id="chantier-context-adresse" class="chantier-context-adresse"></p>
+    <p id="chantier-context-count" class="muted"></p>
   </div>
-  <fieldset class="origin-choices">
-    <legend class="sr-only">Choisir le point de départ</legend>
-    <label
-      ><input type="radio" name="origin-type" value="site" checked />
-      Chantier</label
-    >
-    <label
-      ><input type="radio" name="origin-type" value="current_location" /> Ma
-      position</label
-    >
-    <label
-      ><input type="radio" name="origin-type" value="company" /> Entreprise</label
-    >
-    <label
-      ><input type="radio" name="origin-type" value="other" /> Autre adresse</label
-    >
-  </fieldset>
-  <div class="origin-fields">
-    <div id="address-field">
-      <label id="address-label" for="origin-address">Adresse du chantier</label>
-      <input
-        id="origin-address"
-        list="demo-addresses"
-        value="{{ site_address }}"
-        maxlength="300"
-        minlength="3"
-        required
-        autocomplete="street-address"
-      />
-      <datalist id="demo-addresses">
-        {% for address in demo_addresses %}
-        <option value="{{ address }}"></option>
-        {% endfor %}
-      </datalist>
-      <small
-        >Géocodage simulé : choisissez une adresse de démonstration dans les
-        suggestions.</small
-      >
+  <a id="chantier-banner-link" class="button secondary" href="/chantiers">
+    Retour au chantier
+  </a>
+</section>
+
+<section class="origin-panel" id="origin-section" aria-labelledby="origin-title">
+  <div id="origin-summary" class="compact-summary" hidden>
+    <div>
+      <h2 id="origin-summary-title">Départ</h2>
+      <p id="origin-summary-text" class="compact-summary-text"></p>
     </div>
-    <p id="company-origin" hidden>
-      <strong>Adresse de l’entreprise</strong><br />{{ company_address }}
-    </p>
-    <div id="position-origin" hidden>
-      <p id="position-status" role="status" aria-live="polite">
-        La position sera demandée uniquement à votre initiative.
-      </p>
-      <button id="locate" type="button" class="text-button">
-        Autoriser / actualiser ma position</button
-      ><small
-        >Les coordonnées servent à cette comparaison et ne sont pas
-        conservées.</small
+    <button
+      type="button"
+      class="button secondary"
+      id="origin-expand"
+      aria-expanded="false"
+      aria-controls="origin-detail"
+    >
+      Modifier
+    </button>
+  </div>
+  <div id="origin-detail">
+    <div class="section-heading">
+      <h2 id="origin-title">Point de départ</h2>
+      <span class="muted">Retour à ce point inclus</span>
+    </div>
+    <fieldset class="origin-choices">
+      <legend class="sr-only">Choisir le point de départ</legend>
+      <label
+        ><input type="radio" name="origin-type" value="site" checked />
+        Chantier</label
       >
+      <label
+        ><input type="radio" name="origin-type" value="current_location" /> Ma
+        position</label
+      >
+      <label
+        ><input type="radio" name="origin-type" value="company" /> Entreprise</label
+      >
+      <label
+        ><input type="radio" name="origin-type" value="other" /> Autre adresse</label
+      >
+    </fieldset>
+    <div class="origin-fields">
+      <div id="address-field">
+        <label id="address-label" for="origin-address">Adresse du chantier</label>
+        <input
+          id="origin-address"
+          list="demo-addresses"
+          value="{{ site_address }}"
+          maxlength="300"
+          minlength="3"
+          required
+          autocomplete="street-address"
+        />
+        <datalist id="demo-addresses">
+          {% for address in demo_addresses %}
+          <option value="{{ address }}"></option>
+          {% endfor %}
+        </datalist>
+        <small
+          >Géocodage simulé : choisissez une adresse de démonstration dans les
+          suggestions.</small
+        >
+      </div>
+      <p id="company-origin" hidden>
+        <strong>Adresse de l’entreprise</strong><br />{{ company_address }}
+      </p>
+      <div id="position-origin" hidden>
+        <p id="position-status" role="status" aria-live="polite">
+          La position sera demandée uniquement à votre initiative.
+        </p>
+        <button id="locate" type="button" class="text-button">
+          Autoriser / actualiser ma position</button
+        ><small
+          >Les coordonnées servent à cette comparaison et ne sont pas
+          conservées.</small
+        >
+      </div>
+    </div>
+    <div class="compact-actions" id="origin-collapse-wrap" hidden>
+      <button
+        type="button"
+        class="button secondary"
+        id="origin-collapse"
+        aria-expanded="true"
+        aria-controls="origin-detail"
+      >
+        Réduire
+      </button>
     </div>
   </div>
 </section>
-<section class="workspace" aria-labelledby="cart-title">
-  <div class="section-heading">
-    <h2 id="cart-title">Votre liste de matériaux</h2>
-    <span id="line-count" class="muted">0 produit</span>
-  </div>
-  <form id="add-form" class="add-form">
-    <div class="search-field">
-      <label for="search">Rechercher un matériau</label
-      ><input
-        id="search"
-        type="search"
-        placeholder="BA13, rail, ciment…"
-        autocomplete="off"
-      /><label class="sr-only" for="product">Produit du catalogue</label
-      ><select id="product" required>
-        <option value="">Chargement du catalogue…</option>
-      </select>
+
+<section class="workspace" id="cart-section" aria-labelledby="cart-title">
+  <div id="needs-summary" class="compact-summary needs-summary" hidden>
+    <div class="section-heading compact-summary-heading">
+      <h2 id="needs-summary-title">Besoins</h2>
+      <span id="needs-summary-count" class="muted">0 produit</span>
     </div>
-    <div>
-      <label for="quantity">Quantité</label
-      ><input
-        id="quantity"
-        type="number"
-        value="1"
-        max="1000000"
-        step="1"
-        required
-      />
-    </div>
-    <button type="submit" class="button secondary">+ Ajouter à la liste</button>
-  </form>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Produit</th>
-          <th>Quantité</th>
-          <th>Unité</th>
-          <th><span class="sr-only">Supprimer</span></th>
-        </tr>
-      </thead>
-      <tbody id="cart-body"></tbody>
-    </table>
-  </div>
-  <div id="empty-cart" class="empty">
-    <span aria-hidden="true">+</span><strong>Votre liste commence ici</strong>
-    <p>Ajoutez vos matériaux ou essayez un panier de plâtrerie.</p>
-    <button id="example" class="text-button" type="button">
-      Charger le panier d’exemple →
-    </button>
-  </div>
-  <div class="cart-secondary-actions">
+    <ul id="needs-summary-list" class="needs-summary-list"></ul>
     <button
-      id="save-as-chantier"
       type="button"
       class="button secondary"
-      hidden
-      disabled
+      id="needs-expand"
+      aria-expanded="false"
+      aria-controls="needs-detail"
     >
-      Enregistrer comme chantier
-    </button>
-    <button
-      id="update-chantier"
-      type="button"
-      class="button secondary"
-      hidden
-      disabled
-    >
-      Mettre à jour le chantier
+      Modifier la liste
     </button>
   </div>
+
+  <div id="needs-detail">
+    <div class="section-heading">
+      <h2 id="cart-title">Votre liste de matériaux</h2>
+      <span id="line-count" class="muted">0 produit</span>
+    </div>
+    <form id="add-form" class="add-form">
+      <div class="search-field">
+        <label for="search">Rechercher un matériau</label
+        ><input
+          id="search"
+          type="search"
+          placeholder="BA13, rail, ciment…"
+          autocomplete="off"
+        /><label class="sr-only" for="product">Produit du catalogue</label
+        ><select id="product" required>
+          <option value="">Chargement du catalogue…</option>
+        </select>
+      </div>
+      <div>
+        <label for="quantity">Quantité</label
+        ><input
+          id="quantity"
+          type="number"
+          value="1"
+          max="1000000"
+          step="1"
+          required
+        />
+      </div>
+      <button type="submit" class="button secondary">+ Ajouter à la liste</button>
+    </form>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Produit</th>
+            <th>Quantité</th>
+            <th>Unité</th>
+            <th><span class="sr-only">Supprimer</span></th>
+          </tr>
+        </thead>
+        <tbody id="cart-body"></tbody>
+      </table>
+    </div>
+    <div id="empty-cart" class="empty">
+      <span aria-hidden="true">+</span><strong>Votre liste commence ici</strong>
+      <p>Ajoutez vos matériaux ou essayez un panier de plâtrerie.</p>
+      <button id="example" class="text-button" type="button">
+        Charger le panier d’exemple →
+      </button>
+    </div>
+    <div class="cart-secondary-actions">
+      <button
+        id="save-as-chantier"
+        type="button"
+        class="button secondary"
+        hidden
+        disabled
+      >
+        Enregistrer comme chantier
+      </button>
+      <button
+        id="update-chantier"
+        type="button"
+        class="button secondary"
+        hidden
+        disabled
+      >
+        Enregistrer la liste
+      </button>
+    </div>
+    <p id="update-chantier-hint" class="form-hint muted cart-update-hint" hidden>
+      Met à jour les besoins du chantier sans choisir de fournisseur.
+    </p>
+    <div class="compact-actions" id="needs-collapse-wrap" hidden>
+      <button
+        type="button"
+        class="button secondary"
+        id="needs-collapse"
+        aria-expanded="true"
+        aria-controls="needs-detail"
+      >
+        Réduire
+      </button>
+    </div>
+  </div>
+
   <div class="cart-footer">
-    <p>Prix en € HT · Conditionnements pris en compte</p>
+    <p id="compare-footer-note">Prix en € HT · Conditionnements pris en compte</p>
     <button id="compare" class="button primary" type="button" disabled>
       Comparer mon panier <span aria-hidden="true">→</span>
     </button>
   </div>
 </section>
+
 <section
   id="save-as-chantier-panel"
   class="workspace form-panel save-as-panel"
@@ -260,19 +330,28 @@
   </div>
   <div id="decision-summary" class="decision-summary" hidden></div>
   <div id="results" class="results"></div>
+  <div id="comparator-return" class="comparator-return" hidden>
+    <a id="comparator-return-link" class="button secondary" href="/chantiers">
+      Retour au chantier
+    </a>
+  </div>
   <section
     id="choice-confirm-panel"
     class="workspace form-panel choice-confirm-panel"
     hidden
+    aria-labelledby="choice-confirm-title"
   >
-    <h2 id="choice-confirm-title">Retenir cette solution ?</h2>
+    <h2 id="choice-confirm-title">Confirmer cette solution ?</h2>
     <div id="choice-confirm-body"></div>
+    <p id="choice-confirm-return-note" class="muted form-hint">
+      Après confirmation, retour automatique au chantier.
+    </p>
     <div class="form-actions">
       <button type="button" class="button secondary" id="choice-confirm-cancel">
         Annuler
       </button>
       <button type="button" class="button primary" id="choice-confirm-submit">
-        Confirmer
+        Confirmer et retourner au chantier
       </button>
     </div>
   </section>

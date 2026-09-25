@@ -19,6 +19,8 @@ def test_navigation_on_comparator_and_chantiers(client):
     assert "Mes chantiers" in listing.text
     assert 'href="/chantiers/nouveau"' in listing.text
     assert "Aucun chantier pour le moment" in listing.text
+    assert 'id="chantier-search"' in listing.text
+    assert 'id="chantier-sort"' in listing.text
     assert 'data-page="chantiers-list"' in listing.text
     assert 'href="/"' in listing.text
 
@@ -50,7 +52,9 @@ def test_detail_page_for_existing_and_missing_chantier(client):
     assert chantier["nom"] in page.text
     assert 'data-page="chantier-detail"' in page.text
     assert f'data-chantier-id="{chantier["id"]}"' in page.text
-    assert "Matériaux" in page.text
+    assert "Besoins" in page.text
+    assert "Approvisionnement" in page.text
+    assert "Zone dangereuse" in page.text
     assert "Enregistrer" in page.text
     assert "Comparer les prix" in page.text
     assert 'id="compare-prices"' in page.text

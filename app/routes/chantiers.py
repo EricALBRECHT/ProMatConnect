@@ -6,7 +6,7 @@ from pydantic import AwareDatetime
 
 from app.routes.api import SessionDependency
 from app.schemas.approvisionnement import ApprovisionnementRead, ApprovisionnementWrite
-from app.schemas.chantier import ChantierRead, ChantierUpdate, ChantierWrite
+from app.schemas.chantier import ChantierListItem, ChantierRead, ChantierUpdate, ChantierWrite
 from app.services.approvisionnement import ApprovisionnementService
 from app.services.chantiers import (
     ChantierConflict,
@@ -32,7 +32,7 @@ def execute(action: Callable[[], Result]) -> Result:
         raise HTTPException(409, str(error)) from error
 
 
-@router.get("", response_model=list[ChantierRead])
+@router.get("", response_model=list[ChantierListItem])
 def list_chantiers(
     session: SessionDependency, limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0)
 ):

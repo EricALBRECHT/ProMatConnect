@@ -310,19 +310,28 @@ def test_comparator_choose_button_only_with_chantier():
     home = Path("app/templates/index.html").read_text(encoding="utf-8")
     assert 'id="choice-confirm-panel"' in home
     # Le bouton est conditionné à loadedChantier dans renderStrategy.
-    block = app_js.split("card.append(productsBlock);", 1)[1].split("return card;", 1)[0]
-    assert "if (loadedChantier)" in block
+    assert 'if (loadedChantier)' in app_js
+    assert 'node("button", "Choisir cette solution", "button primary")' in app_js
+    choose_block = app_js.split('node("button", "Choisir cette solution"', 1)[1].split(
+        "card.append(route)", 1
+    )[0]
+    assert "openChoiceConfirm" in choose_block
 
 
 def test_detail_approvisionnement_section_hooks():
     detail = Path("app/templates/chantier_detail.html").read_text(encoding="utf-8")
-    assert "Approvisionnement retenu" in detail
+    assert 'id="appro-title"' in detail
+    assert "Approvisionnement" in detail
     assert 'id="appro-empty"' in detail
     assert 'id="appro-recompare"' in detail
     assert 'id="appro-clear"' in detail
+    assert "Zone dangereuse" in detail
+    assert "Besoins" in detail
     js = Path("app/static/chantiers.js").read_text(encoding="utf-8")
     assert "loadApprovisionnement" in js
     assert "obsolete" in js
+    assert "À comparer" in js
+    assert "Comparaison à refaire" in js
 
 
 def test_openapi_has_approvisionnement_routes(client):

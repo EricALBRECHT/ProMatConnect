@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import (
     AwareDatetime,
@@ -11,6 +12,8 @@ from pydantic import (
 )
 
 from app.schemas.comparison import CartLine
+
+ApprovisionnementStatus = Literal["none", "retained", "obsolete"]
 
 
 class ChantierMaterialWrite(BaseModel):
@@ -89,6 +92,31 @@ class ChantierRead(BaseModel):
     @classmethod
     def utc_timestamp(cls, value: datetime) -> datetime:
         # SQLite perd le fuseau de DateTime ; les écritures applicatives sont toutes UTC.
+        return (
+            value.replace(tzinfo=timezone.utc)
+            if value.tzinfo is None
+            else value.astimezone(timezone.utc)
+        )
+
+
+class ChantierListItem(BaseModel):
+    """Résumé tableau de bord pour GET /api/chantiers (sans lignes matériaux)."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: int
+    nom: str
+    client: str | None
+    adresse: str
+    date_prevue: date | None
+    created_at: datetime
+    updated_at: datetime
+    materiaux_count: int = Field(ge=0)
+    approvisionnement_status: ApprovisionnementStatus
+    material_total: Decimal | None = None
+
+    @field_validator("created_at", "updated_at")
+    @classmethod
+    def utc_timestamp(cls, value: datetime) -> datetime:
         return (
             value.replace(tzinfo=timezone.utc)
             if value.tzinfo is None

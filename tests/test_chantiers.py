@@ -89,7 +89,22 @@ def test_list_chantiers_paginated(client):
     second = create(client, nom="Second")
     data = client.get("/api/chantiers").json()
     assert [c["id"] for c in data] == [second["id"], first["id"]]
-    assert client.get("/api/chantiers?limit=1&offset=1").json() == [first]
+    assert all("materiaux_count" in item for item in data)
+    assert all(item["approvisionnement_status"] == "none" for item in data)
+    assert client.get("/api/chantiers?limit=1&offset=1").json() == [
+        {
+            "id": first["id"],
+            "nom": first["nom"],
+            "client": first["client"],
+            "adresse": first["adresse"],
+            "date_prevue": first["date_prevue"],
+            "created_at": first["created_at"],
+            "updated_at": first["updated_at"],
+            "materiaux_count": len(first["materiaux"]),
+            "approvisionnement_status": "none",
+            "material_total": None,
+        }
+    ]
     assert client.get("/api/chantiers?limit=0").status_code == 422
 
 
@@ -192,7 +207,11 @@ def test_unknown_product_is_atomic(client, action):
     )
     assert response.status_code == 404
     assert response.json()["detail"]["product_ids"] == [999999]
-    assert client.get("/api/chantiers").json() == [data]
+    listed = client.get("/api/chantiers").json()
+    assert len(listed) == 1
+    assert listed[0]["id"] == data["id"]
+    assert listed[0]["materiaux_count"] == 1
+    assert listed[0]["approvisionnement_status"] == "none"
 
 
 @pytest.mark.parametrize(

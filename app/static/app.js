@@ -47,6 +47,7 @@ function invalidate() {
   comparisonFingerprint = null;
   pendingChoice = null;
   hideChoiceConfirm();
+  syncComparatorReturn();
   status();
 }
 
@@ -75,10 +76,12 @@ function syncCompareButton() {
 function syncChantierActions() {
   const saveBtn = $("save-as-chantier");
   const updateBtn = $("update-chantier");
+  const updateHint = $("update-chantier-hint");
   if (!saveBtn || !updateBtn) return;
   const fromChantier = loadedChantier !== null;
   saveBtn.hidden = fromChantier;
   updateBtn.hidden = !fromChantier;
+  if (updateHint) updateHint.hidden = !fromChantier;
   saveBtn.disabled = fromChantier || cart.length === 0;
   updateBtn.disabled = !fromChantier;
   if (fromChantier) hideSaveAsPanel();
@@ -220,18 +223,153 @@ function mergeProductsFromChantier(materiaux) {
 }
 
 function showChantierBanner(chantier) {
-  const banner = $("chantier-banner");
-  if (!banner) return;
-  $("chantier-banner-name").textContent = chantier.nom;
-  $("chantier-banner-link").href = `/chantiers/${chantier.id}`;
-  banner.hidden = false;
+  enterChantierCompactMode(chantier);
 }
 
 function hideChantierBanner() {
-  const banner = $("chantier-banner");
-  if (banner) banner.hidden = true;
   clearLoadedChantier();
+  exitChantierCompactMode();
   syncChantierActions();
+}
+
+function syncComparatorReturn() {
+  const wrap = $("comparator-return");
+  if (!wrap) return;
+  wrap.hidden = !loadedChantier;
+}
+
+function originSummaryLabel() {
+  const type = originType();
+  if (type === "company") {
+    return companyMeta().address || "Adresse de l’entreprise";
+  }
+  if (type === "current_location") {
+    return currentCoordinates
+      ? "Ma position (coordonnées actuelles)"
+      : "Ma position (à autoriser)";
+  }
+  return ($("origin-address")?.value || "").trim() || "Adresse non renseignée";
+}
+
+function refreshOriginSummary() {
+  const text = $("origin-summary-text");
+  if (text) text.textContent = originSummaryLabel();
+}
+
+function refreshNeedsSummary() {
+  const list = $("needs-summary-list");
+  const countEl = $("needs-summary-count");
+  const contextCount = $("chantier-context-count");
+  if (!list || !countEl) return;
+  const n = cart.length;
+  const label = `${n} produit${n > 1 ? "s" : ""}`;
+  countEl.textContent = label;
+  if (contextCount) contextCount.textContent = label;
+  list.replaceChildren();
+  cart.slice(0, 5).forEach((line) => {
+    const product = products.find((item) => item.id === line.product_id);
+    const name = product ? product.name : `Produit #${line.product_id}`;
+    const item = node("li");
+    item.append(
+      node("span", name, "needs-summary-name"),
+      node("span", `× ${line.quantity}`, "needs-summary-qty"),
+    );
+    list.append(item);
+  });
+  if (cart.length > 5) {
+    list.append(
+      node("li", `+ ${cart.length - 5} autres matériaux`, "needs-summary-more"),
+    );
+  }
+}
+
+function setOriginExpanded(expanded) {
+  const summary = $("origin-summary");
+  const detail = $("origin-detail");
+  const collapseWrap = $("origin-collapse-wrap");
+  const expandBtn = $("origin-expand");
+  const collapseBtn = $("origin-collapse");
+  if (!loadedChantier) {
+    if (summary) summary.hidden = true;
+    if (detail) detail.hidden = false;
+    if (collapseWrap) collapseWrap.hidden = true;
+    return;
+  }
+  if (summary) summary.hidden = expanded;
+  if (detail) detail.hidden = !expanded;
+  if (collapseWrap) collapseWrap.hidden = !expanded;
+  if (expandBtn) expandBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (collapseBtn) collapseBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (!expanded) refreshOriginSummary();
+}
+
+function setNeedsExpanded(expanded) {
+  const summary = $("needs-summary");
+  const detail = $("needs-detail");
+  const collapseWrap = $("needs-collapse-wrap");
+  const expandBtn = $("needs-expand");
+  const collapseBtn = $("needs-collapse");
+  if (!loadedChantier) {
+    if (summary) summary.hidden = true;
+    if (detail) detail.hidden = false;
+    if (collapseWrap) collapseWrap.hidden = true;
+    return;
+  }
+  if (summary) summary.hidden = expanded;
+  if (detail) detail.hidden = !expanded;
+  if (collapseWrap) collapseWrap.hidden = !expanded;
+  if (expandBtn) expandBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (collapseBtn) collapseBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (!expanded) refreshNeedsSummary();
+}
+
+function enterChantierCompactMode(chantier) {
+  const intro = $("comparator-intro");
+  const notice = $("comparator-notice");
+  const banner = $("chantier-banner");
+  if (intro) intro.hidden = true;
+  if (notice) notice.hidden = true;
+  if (banner) banner.hidden = false;
+  $("chantier-banner-name").textContent = chantier.nom || "";
+  const adresse = $("chantier-context-adresse");
+  if (adresse) adresse.textContent = chantier.adresse || "";
+  const href = `/chantiers/${chantier.id}`;
+  const topLink = $("chantier-banner-link");
+  if (topLink) topLink.href = href;
+  const returnLink = $("comparator-return-link");
+  if (returnLink) returnLink.href = href;
+  const compare = $("compare");
+  if (compare) {
+    compare.replaceChildren(document.createTextNode("Comparer les prix"));
+  }
+  const note = $("compare-footer-note");
+  if (note) note.textContent = "Comparez ces besoins pour choisir une solution.";
+  document.body.classList.add("comparator-chantier-mode");
+  setOriginExpanded(false);
+  setNeedsExpanded(false);
+  refreshNeedsSummary();
+  syncComparatorReturn();
+}
+
+function exitChantierCompactMode() {
+  const intro = $("comparator-intro");
+  const notice = $("comparator-notice");
+  const banner = $("chantier-banner");
+  if (intro) intro.hidden = false;
+  if (notice) notice.hidden = false;
+  if (banner) banner.hidden = true;
+  const compare = $("compare");
+  if (compare) {
+    const arrow = node("span", "→");
+    arrow.setAttribute("aria-hidden", "true");
+    compare.replaceChildren(document.createTextNode("Comparer mon panier "), arrow);
+  }
+  const note = $("compare-footer-note");
+  if (note) note.textContent = "Prix en € HT · Conditionnements pris en compte";
+  document.body.classList.remove("comparator-chantier-mode");
+  setOriginExpanded(true);
+  setNeedsExpanded(true);
+  syncComparatorReturn();
 }
 
 function applySiteOriginFromChantier(chantier) {
@@ -306,7 +444,7 @@ async function loadChantierFromQuery() {
         true,
       );
     } else {
-      status(`Panier chargé depuis « ${chantier.nom} ».`);
+      status();
     }
   } catch (error) {
     hideChantierBanner();
@@ -339,6 +477,7 @@ const renderCart = () => {
   materialList.renderLines();
   syncCompareButton();
   syncChantierActions();
+  if (loadedChantier) refreshNeedsSummary();
 };
 
 $("example").addEventListener("click", () => {
@@ -384,37 +523,44 @@ function renderStrategy(option) {
     card.append(details);
     return card;
   }
+  const agencies = node(
+    "p",
+    option.stops.map((s) => `${s.name} (${s.supplier})`).join(" → "),
+    "selected-agencies",
+  );
+  card.append(agencies);
   const price = node("p", money(option.material_total), "price");
-  price.append(node("small", " HT"));
-  card.append(price, node("p", "Prix des matériaux", "price-label"));
-  const metrics = node("dl", undefined, "metrics");
+  price.append(node("small", " HT matériaux"));
+  card.append(price);
+  const metrics = node("dl", undefined, "metrics metrics-compact");
   [
-    ["Trajet aller-retour", `${number(option.travel_minutes)} min`],
-    ["Distance totale", `${number(option.total_distance_km)} km`],
-    [
-      "Arrêts / fournisseurs",
-      `${option.stops.length} / ${option.supplier_count}`,
-    ],
-    ["Préparation max.", `${option.max_preparation_minutes} min`],
+    ["Trajet", `${number(option.travel_minutes)} min`],
+    ["Distance", `${number(option.total_distance_km)} km`],
+    ["Arrêts", String(option.stops.length)],
   ].forEach(([label, value]) => {
     const group = node("div");
     group.append(node("dt", label), node("dd", value));
     metrics.append(group);
   });
   card.append(metrics);
-  const agencies = node(
-    "p",
-    option.stops.map((s) => s.name).join(" → "),
-    "selected-agencies",
-  );
-  card.append(agencies);
-  const estimated = node("div", undefined, "estimated-cost");
-  estimated.append(
-    node("span", "Coût estimé d’approvisionnement"),
-    node("strong", money(option.estimated_procurement_cost)),
-    node("small", "Indicateur de comparaison · non facturé"),
-  );
-  card.append(estimated);
+  if (option.estimated_procurement_cost != null) {
+    const estimated = node("div", undefined, "estimated-cost");
+    estimated.append(
+      node("span", "Total estimé"),
+      node("strong", money(option.estimated_procurement_cost)),
+      node("small", "Indicateur · non facturé"),
+    );
+    card.append(estimated);
+  }
+  if (loadedChantier) {
+    const actions = node("div", undefined, "strategy-choose");
+    const choose = node("button", "Choisir cette solution", "button primary");
+    choose.type = "button";
+    choose.dataset.strategyKey = option.key;
+    choose.addEventListener("click", () => openChoiceConfirm(option));
+    actions.append(choose);
+    card.append(actions);
+  }
   const route = node("details");
   route.append(node("summary", "Itinéraire aller-retour"));
   const itinerary = node("ol", undefined, "itinerary");
@@ -488,15 +634,6 @@ function renderStrategy(option) {
       });
   });
   card.append(productsBlock);
-  if (loadedChantier) {
-    const actions = node("div", undefined, "strategy-choose");
-    const choose = node("button", "Choisir cette solution", "button secondary");
-    choose.type = "button";
-    choose.dataset.strategyKey = option.key;
-    choose.addEventListener("click", () => openChoiceConfirm(option));
-    actions.append(choose);
-    card.append(actions);
-  }
   return card;
 }
 
@@ -693,6 +830,11 @@ $("compare").addEventListener("click", async () => {
     comparisonFingerprint = materialsFingerprint(cart);
     renderComparison(data);
     $("results-section").hidden = false;
+    syncComparatorReturn();
+    if (loadedChantier) {
+      setOriginExpanded(false);
+      setNeedsExpanded(false);
+    }
     status("Comparaison terminée. Les résultats sont affichés ci-dessous.");
     $("results-section").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
@@ -701,6 +843,20 @@ $("compare").addEventListener("click", async () => {
   } finally {
     syncCompareButton();
   }
+});
+
+$("origin-expand")?.addEventListener("click", () => setOriginExpanded(true));
+$("origin-collapse")?.addEventListener("click", () => setOriginExpanded(false));
+$("needs-expand")?.addEventListener("click", () => setNeedsExpanded(true));
+$("needs-collapse")?.addEventListener("click", () => setNeedsExpanded(false));
+
+document.querySelectorAll('input[name="origin-type"]').forEach((input) => {
+  input.addEventListener("change", () => {
+    if (loadedChantier && !$("origin-detail")?.hidden) refreshOriginSummary();
+  });
+});
+$("origin-address")?.addEventListener("input", () => {
+  if (loadedChantier) refreshOriginSummary();
 });
 
 async function openChoiceConfirm(option) {
@@ -725,30 +881,28 @@ async function openChoiceConfirm(option) {
   const body = $("choice-confirm-body");
   body.replaceChildren();
   $("choice-confirm-title").textContent =
-    `Retenir cette solution pour le chantier « ${loadedChantier.nom} » ?`;
-  body.append(
-    node("p", `Stratégie : ${option.title}`),
-    node("p", agencies ? `Agence(s) : ${agencies}` : "Aucune agence"),
-    node(
-      "p",
-      `Total matériaux : ${money(option.material_total)} HT`,
-    ),
-  );
+    `Confirmer cette solution pour « ${loadedChantier.nom} » ?`;
+  body.append(node("p", option.title, "choice-strategy"));
+  if (agencies) body.append(node("p", agencies));
   if (option.estimated_procurement_cost != null) {
     body.append(
       node(
         "p",
-        `Total estimé d’approvisionnement : ${money(option.estimated_procurement_cost)}`,
+        `Total estimé : ${money(option.estimated_procurement_cost)} HT`,
+        "choice-total",
       ),
+    );
+  } else if (option.material_total != null) {
+    body.append(
+      node("p", `Matériaux : ${money(option.material_total)} HT`, "choice-total"),
     );
   }
   if (hasExisting) {
     body.append(
       node(
         "p",
-        "Ce chantier possède déjà un approvisionnement retenu. "
-          + "Le remplacer par cette nouvelle solution ?",
-        "status error",
+        "Remplace l’approvisionnement déjà retenu pour ce chantier.",
+        "muted",
       ),
     );
   }
@@ -802,9 +956,11 @@ $("choice-confirm-submit").addEventListener("click", async () => {
         apiErrorMessage(payload, "Impossible de retenir cette solution."),
       );
     }
-    loadedChantier.updated_at = payload.chantier_updated_at;
+    const chantierId = loadedChantier.id;
     hideChoiceConfirm();
-    status("Approvisionnement retenu enregistré.");
+    window.location.assign(
+      `/chantiers/${chantierId}?approvisionnement=retenu`,
+    );
   } catch (error) {
     status(error.message || "Connexion impossible. Réessayez.", true);
   } finally {
@@ -890,7 +1046,7 @@ $("update-chantier").addEventListener("click", async () => {
   if (cart.length === 0 && !window.confirm(EMPTY_UPDATE_CONFIRM)) return;
   const button = $("update-chantier");
   button.disabled = true;
-  status("Mise à jour du chantier…");
+  status("Enregistrement de la liste…");
   const body = {
     nom: loadedChantier.nom,
     client: loadedChantier.client,
@@ -926,14 +1082,14 @@ $("update-chantier").addEventListener("click", async () => {
       throw new Error(
         apiErrorMessage(
           payload,
-          "Impossible de mettre à jour ce chantier. Votre panier est conservé.",
+          "Impossible d’enregistrer la liste. Votre panier est conservé.",
         ),
       );
     }
     const updated = await response.json();
     rememberLoadedChantier(updated);
     showChantierBanner(updated);
-    status("Chantier mis à jour.");
+    status("Liste enregistrée. Les besoins du chantier sont à jour.");
   } catch (error) {
     status(error.message || "Connexion impossible. Réessayez.", true);
   } finally {

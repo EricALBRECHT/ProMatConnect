@@ -163,8 +163,10 @@ window.ProMatMaterials = (() => {
         if (!product) return;
         const row = node("tr");
         const name = node("td", product.name);
+        name.dataset.label = "Produit";
         name.append(node("small", `${product.code} · ${product.category}`));
         const quantityCell = node("td");
+        quantityCell.dataset.label = "Quantité";
         const input = configureQuantityInput(node("input", undefined, "line-quantity"), {
           value: line.quantity,
           ariaLabel: `Quantité pour ${product.name}`,
@@ -174,7 +176,10 @@ window.ProMatMaterials = (() => {
           onChange();
         });
         quantityCell.append(input);
+        const unitCell = node("td", product.reference_unit);
+        unitCell.dataset.label = "Unité";
         const removeCell = node("td");
+        removeCell.dataset.label = "Actions";
         const remove = node("button", "×", "remove");
         remove.type = "button";
         remove.setAttribute("aria-label", `Supprimer ${product.name}`);
@@ -184,12 +189,7 @@ window.ProMatMaterials = (() => {
           renderLines();
         });
         removeCell.append(remove);
-        row.append(
-          name,
-          quantityCell,
-          node("td", product.reference_unit),
-          removeCell,
-        );
+        row.append(name, quantityCell, unitCell, removeCell);
         body.append(row);
       });
       empty.hidden = lines.length > 0;

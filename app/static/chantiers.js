@@ -12,8 +12,14 @@ const {
 const CONFLICT_MESSAGE =
   "Ce chantier a été modifié dans un autre onglet. Rechargez la page avant de poursuivre.";
 const STALE_APPRO_MESSAGE =
-  "Les besoins du chantier ont changé depuis le choix de cet "
-  + "approvisionnement. Une nouvelle comparaison est recommandée.";
+  "Les besoins du chantier ont changé depuis cette comparaison.";
+
+const APPRO_STATUS_LABELS = {
+  none: "À comparer",
+  retained: "Approvisionnement retenu",
+  obsolete: "Comparaison à refaire",
+};
+
 const money = (value) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(
     Number(value),
@@ -71,11 +77,37 @@ function fillForm(chantier) {
   $("longitude").value = chantier.longitude ?? "";
   if ($("updated_at")) $("updated_at").value = chantier.updated_at || "";
   if ($("detail-title")) $("detail-title").textContent = chantier.nom;
+  renderIdentityCompact(chantier);
+}
+
+function renderIdentityCompact(chantier) {
+  const clientEl = $("identity-compact-client");
+  const adresseEl = $("identity-compact-adresse");
+  const dateEl = $("identity-compact-date");
+  const notesEl = $("identity-compact-notes");
+  if (!clientEl || !adresseEl || !dateEl) return;
+  const client = (chantier.client || "").trim();
+  clientEl.textContent = client ? `Client : ${client}` : "Client : —";
+  adresseEl.textContent = chantier.adresse || "";
+  dateEl.textContent = chantier.date_prevue
+    ? `Prévu le ${formatDate(chantier.date_prevue)}`
+    : "";
+  dateEl.hidden = !chantier.date_prevue;
+  const notes = (chantier.notes || "").trim();
+  if (notesEl) {
+    notesEl.textContent = notes;
+    notesEl.hidden = !notes;
+  }
 }
 
 async function loadList() {
   const grid = $("chantiers-grid");
   const empty = $("chantiers-empty");
+  const none = $("chantiers-none");
+  const toolbar = $("chantiers-toolbar");
+  const searchInput = $("chantier-search");
+  const sortSelect = $("chantier-sort");
+  let chantiers = [];
   const params = new URLSearchParams(window.location.search);
   const justDeleted = params.get("supprime") === "1";
   if (justDeleted) {
@@ -86,49 +118,124 @@ async function loadList() {
   } else {
     status("Chargement…");
   }
-  try {
-    const response = await fetch("/api/chantiers");
-    if (!response.ok) throw new Error("Impossible de charger les chantiers.");
-    const chantiers = await response.json();
+
+  function matchesSearch(chantier, needle) {
+    if (!needle) return true;
+    const haystack = [chantier.nom, chantier.client || "", chantier.adresse]
+      .join(" ")
+      .toLocaleLowerCase("fr");
+    return haystack.includes(needle);
+  }
+
+  function sortedChantiers(items) {
+    const mode = (sortSelect && sortSelect.value) || "recent";
+    const copy = items.slice();
+    if (mode === "name") {
+      copy.sort((a, b) =>
+        a.nom.localeCompare(b.nom, "fr", { sensitivity: "base" }),
+      );
+    } else if (mode === "date") {
+      copy.sort((a, b) => {
+        if (!a.date_prevue && !b.date_prevue) return b.id - a.id;
+        if (!a.date_prevue) return 1;
+        if (!b.date_prevue) return -1;
+        return a.date_prevue.localeCompare(b.date_prevue) || b.id - a.id;
+      });
+    } else {
+      copy.sort((a, b) => {
+        const byDate = String(b.updated_at).localeCompare(String(a.updated_at));
+        return byDate || b.id - a.id;
+      });
+    }
+    return copy;
+  }
+
+  function statusBadge(statusKey) {
+    const badge = node("span", APPRO_STATUS_LABELS[statusKey] || statusKey, `badge status-${statusKey}`);
+    if (statusKey === "retained") {
+      badge.prepend(document.createTextNode("✓ "));
+    } else if (statusKey === "obsolete") {
+      badge.prepend(document.createTextNode("⚠ "));
+    }
+    return badge;
+  }
+
+  function renderCard(chantier) {
+    const card = node("a", undefined, "chantier-card");
+    card.href = `/chantiers/${chantier.id}`;
+    card.setAttribute("role", "listitem");
+    card.setAttribute("aria-label", `Ouvrir le chantier ${chantier.nom}`);
+
+    const body = node("div", undefined, "chantier-card-body");
+    body.append(node("h2", chantier.nom));
+    if (chantier.client) {
+      body.append(node("p", `Client : ${chantier.client}`, "chantier-client"));
+    }
+    body.append(node("p", chantier.adresse, "chantier-address"));
+    if (chantier.date_prevue) {
+      body.append(
+        node("p", `Prévu le ${formatDate(chantier.date_prevue)}`, "chantier-date"),
+      );
+    }
+    const count = chantier.materiaux_count;
+    body.append(
+      node(
+        "p",
+        `${count} matériau${count > 1 ? "x" : ""}`,
+        "chantier-count",
+      ),
+    );
+    const statusKey = chantier.approvisionnement_status || "none";
+    body.append(statusBadge(statusKey));
+    if (chantier.material_total != null && chantier.material_total !== "") {
+      body.append(
+        node("p", `${money(chantier.material_total)} HT`, "chantier-total"),
+      );
+    }
+    const open = node("span", "Ouvrir", "button secondary chantier-open");
+    open.setAttribute("aria-hidden", "true");
+    card.append(body, open);
+    return card;
+  }
+
+  function render() {
+    const needle = (searchInput?.value || "").trim().toLocaleLowerCase("fr");
+    const filtered = sortedChantiers(
+      chantiers.filter((item) => matchesSearch(item, needle)),
+    );
     if (!chantiers.length) {
+      toolbar.hidden = true;
       grid.hidden = true;
       grid.replaceChildren();
       empty.hidden = false;
-      if (!justDeleted) status();
+      none.hidden = true;
       return;
     }
     empty.hidden = true;
+    toolbar.hidden = false;
+    if (!filtered.length) {
+      grid.hidden = true;
+      grid.replaceChildren();
+      none.hidden = false;
+      return;
+    }
+    none.hidden = true;
     grid.hidden = false;
-    grid.replaceChildren(
-      ...chantiers.map((chantier) => {
-        const card = node("article", undefined, "chantier-card");
-        card.append(node("h2", chantier.nom));
-        if (chantier.client) {
-          card.append(node("p", chantier.client, "chantier-client"));
-        }
-        card.append(node("p", chantier.adresse, "chantier-address"));
-        if (chantier.date_prevue) {
-          card.append(
-            node("p", `Prévu le ${formatDate(chantier.date_prevue)}`, "muted"),
-          );
-        }
-        const count = chantier.materiaux.length;
-        card.append(
-          node(
-            "p",
-            `${count} matériau${count > 1 ? "x" : ""}`,
-            "chantier-count",
-          ),
-        );
-        const open = node("a", "Ouvrir", "button secondary");
-        open.href = `/chantiers/${chantier.id}`;
-        card.append(open);
-        return card;
-      }),
-    );
+    grid.replaceChildren(...filtered.map(renderCard));
+  }
+
+  try {
+    const response = await fetch("/api/chantiers");
+    if (!response.ok) throw new Error("Impossible de charger les chantiers.");
+    chantiers = await response.json();
+    render();
+    if (searchInput) searchInput.addEventListener("input", render);
+    if (sortSelect) sortSelect.addEventListener("change", render);
     if (!justDeleted) status();
   } catch (error) {
     empty.hidden = true;
+    none.hidden = true;
+    if (toolbar) toolbar.hidden = true;
     grid.hidden = true;
     status(error.message || "Connexion impossible. Réessayez.", true);
   }
@@ -169,6 +276,9 @@ async function setupDetail(chantierId) {
   let saving = false;
   let chantierNom = "";
   let hasApprovisionnement = false;
+  let identityEditing = false;
+  let identitySnapshot = null;
+  let currentChantier = null;
 
   function markDirty() {
     dirty = true;
@@ -185,11 +295,81 @@ async function setupDetail(chantierId) {
     status,
   });
 
-  $("nom").addEventListener("input", markDirty);
-  $("client").addEventListener("input", markDirty);
-  $("adresse").addEventListener("input", markDirty);
-  $("date_prevue").addEventListener("input", markDirty);
-  $("notes").addEventListener("input", markDirty);
+  function showIdentityCompact() {
+    identityEditing = false;
+    identitySnapshot = null;
+    const compact = $("identity-compact");
+    const panel = $("identity-edit-panel");
+    if (compact) compact.hidden = false;
+    if (panel) panel.hidden = true;
+  }
+
+  function showIdentityEdit() {
+    identityEditing = true;
+    identitySnapshot = {
+      nom: $("nom").value,
+      client: $("client").value,
+      adresse: $("adresse").value,
+      date_prevue: $("date_prevue").value,
+      notes: $("notes").value,
+      latitude: $("latitude").value,
+      longitude: $("longitude").value,
+    };
+    const compact = $("identity-compact");
+    const panel = $("identity-edit-panel");
+    if (compact) compact.hidden = true;
+    if (panel) panel.hidden = false;
+    $("nom").focus();
+  }
+
+  function cancelIdentityEdit() {
+    if (!identityEditing || !identitySnapshot) {
+      showIdentityCompact();
+      return;
+    }
+    $("nom").value = identitySnapshot.nom;
+    $("client").value = identitySnapshot.client;
+    $("adresse").value = identitySnapshot.adresse;
+    $("date_prevue").value = identitySnapshot.date_prevue;
+    $("notes").value = identitySnapshot.notes;
+    $("latitude").value = identitySnapshot.latitude;
+    $("longitude").value = identitySnapshot.longitude;
+    if (currentChantier) {
+      $("detail-title").textContent = currentChantier.nom;
+      renderIdentityCompact(currentChantier);
+    }
+    showIdentityCompact();
+    status();
+  }
+
+  function setApproBadge(statusKey) {
+    const badge = $("appro-badge");
+    if (!badge) return;
+    const labels = {
+      none: "À comparer",
+      retained: "Solution retenue",
+      obsolete: "Comparaison à refaire",
+    };
+    const label = labels[statusKey] || statusKey;
+    badge.className = `badge status-${statusKey}`;
+    badge.textContent =
+      statusKey === "retained"
+        ? `✓ ${label}`
+        : statusKey === "obsolete"
+          ? `⚠ ${label}`
+          : label;
+    // Badge section : uniquement l’état vide ; sinon proche du titre de stratégie.
+    badge.hidden = statusKey !== "none";
+  }
+
+  function strategyStatusBadge(statusKey) {
+    const labels = {
+      retained: "✓ Solution retenue",
+      obsolete: "⚠ Comparaison à refaire",
+    };
+    if (!labels[statusKey]) return null;
+    return node("span", labels[statusKey], `badge status-${statusKey}`);
+  }
 
   function renderApprovisionnement(appro) {
     const empty = $("appro-empty");
@@ -202,8 +382,10 @@ async function setupDetail(chantierId) {
       empty.hidden = false;
       content.hidden = true;
       content.replaceChildren();
+      content.classList.remove("appro-secondary");
       obsolete.hidden = true;
       actions.hidden = true;
+      setApproBadge("none");
       return;
     }
     hasApprovisionnement = true;
@@ -212,14 +394,27 @@ async function setupDetail(chantierId) {
     actions.hidden = false;
     obsolete.hidden = !appro.obsolete;
     if (appro.obsolete) obsolete.textContent = STALE_APPRO_MESSAGE;
+    const statusKey = appro.obsolete ? "obsolete" : "retained";
+    setApproBadge(statusKey);
+    content.classList.toggle("appro-secondary", Boolean(appro.obsolete));
     const strategy = (appro.snapshot && appro.snapshot.strategy) || {};
     const stops = strategy.stops || [];
     const summary = node("div", undefined, "appro-summary");
-    summary.append(
-      node("p", `Stratégie : ${appro.strategy_title || strategy.title || appro.strategy_key}`),
+    const titleRow = node("div", undefined, "appro-strategy-row");
+    titleRow.append(
       node(
         "p",
-        `Choisi le ${new Date(appro.chosen_at).toLocaleString("fr-FR")}`,
+        appro.strategy_title || strategy.title || appro.strategy_key,
+        "appro-strategy",
+      ),
+    );
+    const inlineBadge = strategyStatusBadge(statusKey);
+    if (inlineBadge) titleRow.append(inlineBadge);
+    summary.append(
+      titleRow,
+      node(
+        "p",
+        `Choisie le ${new Date(appro.chosen_at).toLocaleDateString("fr-FR")}`,
         "muted",
       ),
     );
@@ -227,50 +422,50 @@ async function setupDetail(chantierId) {
       summary.append(
         node(
           "p",
-          `Agence(s) : ${stops.map((s) => `${s.name} (${s.supplier})`).join(" → ")}`,
+          stops.map((s) => `${s.name} (${s.supplier})`).join(" → "),
+          "appro-agencies",
         ),
       );
     }
+    const totals = node("dl", undefined, "appro-totals");
+    const rows = [];
     if (appro.material_total != null) {
-      summary.append(node("p", `Total matériaux : ${money(appro.material_total)} HT`));
-    }
-    if (appro.total_distance_km != null) {
-      summary.append(node("p", `Distance : ${number(appro.total_distance_km)} km`));
-    }
-    if (appro.travel_minutes != null) {
-      summary.append(node("p", `Trajet : ${number(appro.travel_minutes)} min`));
+      rows.push(["Matériaux", `${money(appro.material_total)}`]);
     }
     const distanceCost =
       strategy.cost_breakdown && strategy.cost_breakdown.distance_cost;
     if (distanceCost != null) {
-      summary.append(
-        node("p", `Coût trajet (indicateur) : ${money(distanceCost)}`),
-      );
+      rows.push(["Trajet", money(distanceCost)]);
+    } else if (appro.total_distance_km != null || appro.travel_minutes != null) {
+      const parts = [];
+      if (appro.total_distance_km != null) {
+        parts.push(`${number(appro.total_distance_km)} km`);
+      }
+      if (appro.travel_minutes != null) {
+        parts.push(`${number(appro.travel_minutes)} min`);
+      }
+      rows.push(["Trajet", parts.join(" · ")]);
     }
     if (appro.estimated_procurement_cost != null) {
-      summary.append(
-        node(
-          "strong",
-          `Total estimé d’approvisionnement : ${money(appro.estimated_procurement_cost)}`,
-        ),
-      );
+      rows.push(["Total estimé", money(appro.estimated_procurement_cost)]);
     }
+    rows.forEach(([label, value]) => {
+      const group = node("div");
+      group.append(node("dt", label), node("dd", value));
+      totals.append(group);
+    });
+    if (rows.length) summary.append(totals);
+
     const linesBlock = node("div", undefined, "appro-lines");
     linesBlock.append(node("h3", "Matériaux retenus"));
     (strategy.lines || []).forEach((line) => {
       const item = node("div", undefined, "appro-line");
       item.append(
-        node("strong", line.product_name),
         node(
-          "p",
-          `${number(line.requested_quantity)} ${line.reference_unit} demandés · `
-            + `${line.packs} × ${line.supplier_unit} · ${money(line.line_total)} HT`,
+          "strong",
+          `${number(line.requested_quantity)} × ${line.product_name}`,
         ),
-        node(
-          "p",
-          `${line.supplier} · réf. ${line.supplier_reference} · ${money(line.pack_price)} / pack`,
-          "muted",
-        ),
+        node("p", `${money(line.line_total)} HT · ${line.supplier}`, "muted"),
       );
       linesBlock.append(item);
     });
@@ -288,7 +483,6 @@ async function setupDetail(chantierId) {
       renderApprovisionnement(await response.json());
     } catch (error) {
       renderApprovisionnement(null);
-      // Ne pas faire échouer l'init / la sauvegarde : l'appro est secondaire.
       if (error && error.message) {
         console.warn("Approvisionnement:", error.message);
       }
@@ -325,6 +519,7 @@ async function setupDetail(chantierId) {
           apiErrorMessage(payload, "Impossible d’enregistrer ce chantier."),
         );
       }
+      currentChantier = payload;
       fillForm(payload);
       chantierNom = payload.nom;
       lines = payload.materiaux.map((line) => ({
@@ -333,8 +528,7 @@ async function setupDetail(chantierId) {
       }));
       materialList.renderLines();
       dirty = false;
-      // L'enregistrement métier a réussi : un souci d'affichage appro ne doit pas le faire échouer
-      // (sinon « Comparer les prix » en mode dirty refuse la navigation).
+      showIdentityCompact();
       try {
         await loadApprovisionnement();
       } catch (approError) {
@@ -350,7 +544,28 @@ async function setupDetail(chantierId) {
     }
   }
 
+  $("identity-edit").addEventListener("click", () => {
+    showIdentityEdit();
+  });
+  $("identity-cancel").addEventListener("click", () => {
+    cancelIdentityEdit();
+  });
+  $("identity-save").addEventListener("click", async () => {
+    const button = $("identity-save");
+    button.disabled = true;
+    try {
+      const saved = await saveChantier({ quiet: true });
+      if (saved) {
+        showIdentityCompact();
+        status("Informations enregistrées.");
+      }
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   $("save-button").addEventListener("click", async () => {
+    if (identityEditing) cancelIdentityEdit();
     const button = $("save-button");
     button.disabled = true;
     $("compare-prices").disabled = true;
@@ -362,14 +577,15 @@ async function setupDetail(chantierId) {
     }
   });
 
-  // Actions primaires AVANT les handlers appro (secondaires) :
-  // une exception sur un bind secondaire ne doit pas empêcher Comparer / Supprimer.
-  $("compare-prices").addEventListener("click", async () => {
+  const goCompare = async () => {
     if (saving) return;
+    if (identityEditing) cancelIdentityEdit();
     const button = $("compare-prices");
     const saveButton = $("save-button");
     button.disabled = true;
     saveButton.disabled = true;
+    const emptyCompare = $("appro-compare-empty");
+    if (emptyCompare) emptyCompare.disabled = true;
     try {
       if (dirty) {
         const saved = await saveChantier({ quiet: true });
@@ -379,10 +595,20 @@ async function setupDetail(chantierId) {
     } finally {
       button.disabled = false;
       saveButton.disabled = false;
+      if (emptyCompare) emptyCompare.disabled = false;
     }
-  });
+  };
+
+  // Actions primaires AVANT les handlers appro (secondaires) :
+  // une exception sur un bind secondaire ne doit pas empêcher Comparer / Supprimer.
+  $("compare-prices").addEventListener("click", goCompare);
+  const approCompareEmpty = $("appro-compare-empty");
+  if (approCompareEmpty) {
+    approCompareEmpty.addEventListener("click", goCompare);
+  }
 
   $("delete-chantier").addEventListener("click", () => {
+    if (identityEditing) cancelIdentityEdit();
     const box = $("delete-chantier-message");
     const panel = $("delete-chantier-panel");
     if (!box || !panel) return;
@@ -433,9 +659,7 @@ async function setupDetail(chantierId) {
 
   const approRecompare = $("appro-recompare");
   if (approRecompare) {
-    approRecompare.addEventListener("click", () => {
-      $("compare-prices").click();
-    });
+    approRecompare.addEventListener("click", goCompare);
   }
 
   const approClear = $("appro-clear");
@@ -467,6 +691,7 @@ async function setupDetail(chantierId) {
         const refreshed = await fetch(`/api/chantiers/${chantierId}`);
         if (refreshed.ok) {
           const chantier = await refreshed.json();
+          currentChantier = chantier;
           fillForm(chantier);
           chantierNom = chantier.nom;
         }
@@ -476,6 +701,18 @@ async function setupDetail(chantierId) {
         status(error.message || "Connexion impossible. Réessayez.", true);
       }
     });
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const retainedFlash = params.get("approvisionnement") === "retenu";
+  if (retainedFlash) {
+    params.delete("approvisionnement");
+    const next = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      next ? `/chantiers/${chantierId}?${next}` : `/chantiers/${chantierId}`,
+    );
   }
 
   try {
@@ -492,7 +729,9 @@ async function setupDetail(chantierId) {
     }
     if (!response.ok) throw new Error("Impossible de charger ce chantier.");
     const chantier = await response.json();
+    currentChantier = chantier;
     fillForm(chantier);
+    showIdentityCompact();
     chantierNom = chantier.nom;
     lines = chantier.materiaux.map((line) => ({
       product_id: line.product_id,
@@ -506,17 +745,20 @@ async function setupDetail(chantierId) {
     } catch (approError) {
       console.warn("Approvisionnement au chargement:", approError);
     }
-    status();
+    if (retainedFlash) {
+      status("Solution d’approvisionnement enregistrée.");
+    } else {
+      status();
+    }
   } catch (error) {
     status(error.message || "Connexion impossible. Réessayez.", true);
-    // Ne désactiver Comparer que si le chantier lui-même n'a pas pu être chargé.
     if (!$("updated_at").value) {
       $("compare-prices").disabled = true;
     }
   }
 
   window.addEventListener("beforeunload", (event) => {
-    if (!dirty) return;
+    if (!dirty && !identityEditing) return;
     event.preventDefault();
     event.returnValue = "";
   });

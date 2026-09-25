@@ -21,6 +21,7 @@ def test_detail_primary_actions_bound_before_secondary_appro():
     )[0]
     assert "await loadApprovisionnement()" in save_block
     assert "Approvisionnement après sauvegarde" in save_block
+    assert 'addEventListener("click", goCompare)' in js
 
 
 def test_detail_template_has_primary_and_appro_hooks(client):

@@ -21,7 +21,8 @@ def test_comparator_page_has_save_and_update_hooks(client):
     assert 'id="save-as-chantier"' in home
     assert "Enregistrer comme chantier" in home
     assert 'id="update-chantier"' in home
-    assert "Mettre à jour le chantier" in home
+    assert "Enregistrer la liste" in home
+    assert "Mettre à jour le chantier" not in home
     assert 'id="save-as-chantier-panel"' in home
     assert 'id="save-as-nom"' in home
     assert 'id="save-as-adresse"' in home
