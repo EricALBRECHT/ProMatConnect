@@ -381,13 +381,14 @@ def test_create_all_is_additive_on_preexisting_schema(database_url):
             "chantier_materials",
             "approvisionnements_retenus",
             "achat_suivi_lignes",
+            "supplier_imports",
         } <= set(inspect(engine).get_table_names())
         ddl = [
             s.strip().upper()
             for s in statements
             if s.strip().upper().startswith(("CREATE TABLE", "ALTER", "DROP"))
         ]
-        assert len(ddl) == 4
+        assert len(ddl) == 5
         assert all(s.startswith("CREATE TABLE") for s in ddl)
     finally:
         engine.dispose()

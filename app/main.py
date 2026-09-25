@@ -14,9 +14,11 @@ from app.config import Settings
 from app.database import Base, make_engine
 from app.routes.api import router
 from app.routes.chantiers import router as chantiers_router
+from app.schema_ensure import ensure_schema
 from app.services.chantiers import ChantierNotFound, ChantierService
 from app.services.geocoding import FakeGeocodingService
 from app.services.shopping_list import ShoppingListService
+from app.services.supplier_import import SupplierImportService
 from app.version import APP_VERSION
 from scripts.seed import seed
 
@@ -57,6 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.session_factory = sessionmaker(engine, expire_on_commit=False)
         try:
             Base.metadata.create_all(engine)
+            ensure_schema(engine)
             if settings.seed_on_start:
                 with app.state.session_factory() as session:
                     seed(session)
@@ -147,6 +150,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             context={
                 "nav_active": "chantiers",
                 "liste": shopping_list,
+            },
+        )
+
+    @application.get("/admin/fournisseurs", include_in_schema=False)
+    def admin_fournisseurs(request: Request):
+        """Page technique d'import CSV — non authentifiée (à protéger avant production)."""
+        with request.app.state.session_factory() as session:
+            service = SupplierImportService(session)
+            sources = service.list_sources()
+            history = [
+                {
+                    "filename": row.filename,
+                    "supplier_name": row.supplier_name,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "rows": row.rows,
+                    "status": row.status,
+                    "mapped": row.mapped,
+                    "unmapped": row.unmapped,
+                    "source_key": row.source_key,
+                }
+                for row in service.list_imports()
+            ]
+        return templates.TemplateResponse(
+            request=request,
+            name="admin_fournisseurs.html",
+            context={
+                "nav_active": "admin",
+                "sources": sources,
+                "history": history,
+                "app_version": APP_VERSION,
+                "security_note": (
+                    "Page technique sans authentification — à protéger avant toute mise en production."
+                ),
             },
         )
 

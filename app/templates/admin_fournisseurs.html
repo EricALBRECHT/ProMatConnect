@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Admin fournisseurs — ProMatConnect{% endblock %}
+{% block description %}Import technique de catalogues fournisseurs CSV.{% endblock %}
+{% block content %}
+<section class="admin-page" data-admin-suppliers>
+  <div class="page-header">
+    <div>
+      <p class="eyebrow">Administration technique · v{{ app_version }}</p>
+      <h1>Fournisseurs / sources</h1>
+      <p class="lede">
+        Prépare l’ingestion de catalogues CSV. Les prix importés ne sont
+        <strong>pas</strong> des prix live fournisseurs.
+      </p>
+    </div>
+  </div>
+
+  <p class="admin-security" role="note">{{ security_note }}</p>
+
+  <section class="admin-section">
+    <h2>Sources actives</h2>
+    <ul class="admin-source-list">
+      {% for source in sources %}
+      <li>
+        <div>
+          <strong>{{ source.name }}</strong>
+          <span class="muted">· {{ source.source_type }}</span>
+        </div>
+        <div class="admin-source-meta">
+          <span>Statut : {{ source.status }}</span>
+          <span>{{ source.offers }} offres</span>
+          <span>Màj : {{ source.updated_at or "—" }}</span>
+        </div>
+      </li>
+      {% else %}
+      <li class="muted">Aucune source enregistrée.</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="admin-section">
+    <h2>Importer un CSV</h2>
+    <form class="admin-import-form" id="supplier-import-form">
+      <label class="admin-file-label">
+        <span>Choisir un fichier CSV</span>
+        <input type="file" id="supplier-csv" name="file" accept=".csv,text/csv" required />
+      </label>
+      <div class="admin-actions">
+        <button type="button" class="button secondary" id="supplier-preview-btn">
+          Prévisualiser
+        </button>
+        <button type="button" class="button" id="supplier-commit-btn" disabled>
+          Confirmer l’import
+        </button>
+      </div>
+    </form>
+    <div id="supplier-preview" class="admin-preview" hidden></div>
+  </section>
+
+  <section class="admin-section">
+    <h2>Historique récent</h2>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Fichier</th>
+            <th>Fournisseur</th>
+            <th>Date</th>
+            <th>Lignes</th>
+            <th>Statut</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in history %}
+          <tr>
+            <td>{{ row.filename }}</td>
+            <td>{{ row.supplier_name }}</td>
+            <td>{{ row.created_at or "—" }}</td>
+            <td>{{ row.rows }}</td>
+            <td>{{ row.status }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" class="muted">Aucun import pour le moment.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ static_asset('admin_suppliers.js') }}" defer></script>
+{% endblock %}

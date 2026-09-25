@@ -5,6 +5,7 @@ COPY requirements.txt requirements-dev.txt constraints.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY scripts ./scripts
+COPY examples ./examples
 RUN useradd --create-home --uid 10001 appuser
 USER appuser
 EXPOSE 8000

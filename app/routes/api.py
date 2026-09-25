@@ -1,10 +1,11 @@
 from collections.abc import Iterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.connectors.file_csv import MAX_UPLOAD_BYTES
 from app.connectors.registry import build_connectors
 from app.repositories.catalog import CatalogRepository
 from app.schemas.catalog import ProductRead
@@ -15,6 +16,8 @@ from app.services.optimization import OptimizationLimitError
 from app.services.origin import OriginService
 from app.services.procurement_cost import CostParameters
 from app.services.routing import FakeRoutingService, RoutingService
+from app.services.supplier_import import SupplierImportService
+from app.version import APP_VERSION
 
 router = APIRouter(prefix="/api")
 
@@ -92,4 +95,67 @@ def compare(
 @router.get("/health", tags=["Exploitation"])
 def health(session: SessionDependency):
     session.execute(text("SELECT 1"))
-    return {"status": "ok", "version": "0.2.0", "mode": "simulation"}
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "mode": "catalog",
+        "data_sources": ["demo", "file"],
+    }
+
+
+async def _read_csv_upload(upload: UploadFile) -> tuple[bytes, str]:
+    filename = upload.filename or "import.csv"
+    if not filename.lower().endswith(".csv"):
+        raise HTTPException(400, "Seuls les fichiers .csv sont acceptés.")
+    data = await upload.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, f"Fichier trop volumineux (max {MAX_UPLOAD_BYTES // 1024} Ko).")
+    return data, filename
+
+
+@router.post("/supplier-imports/preview", tags=["Imports fournisseurs"])
+async def supplier_import_preview(
+    session: SessionDependency,
+    file: UploadFile = File(...),
+):
+    """Valide un CSV sans écrire en base."""
+    data, filename = await _read_csv_upload(file)
+    return SupplierImportService(session).preview(data, filename).to_dict()
+
+
+@router.post("/supplier-imports", tags=["Imports fournisseurs"])
+async def supplier_import_commit(
+    session: SessionDependency,
+    file: UploadFile = File(...),
+):
+    """Importe un CSV après re-validation (transaction complète)."""
+    data, filename = await _read_csv_upload(file)
+    result = SupplierImportService(session).import_file(data, filename)
+    if not result.valid:
+        raise HTTPException(400, result.to_dict())
+    return result.to_dict()
+
+
+@router.get("/supplier-imports", tags=["Imports fournisseurs"])
+def supplier_import_history(session: SessionDependency, limit: int = Query(20, ge=1, le=100)):
+    rows = SupplierImportService(session).list_imports(limit)
+    return [
+        {
+            "source_key": row.source_key,
+            "filename": row.filename,
+            "supplier_name": row.supplier_name,
+            "status": row.status,
+            "rows": row.rows,
+            "agencies": row.agencies,
+            "offers": row.offers,
+            "mapped": row.mapped,
+            "unmapped": row.unmapped,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
+
+
+@router.get("/supplier-sources", tags=["Imports fournisseurs"])
+def supplier_sources(session: SessionDependency):
+    return SupplierImportService(session).list_sources()

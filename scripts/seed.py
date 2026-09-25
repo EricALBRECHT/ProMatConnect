@@ -64,9 +64,12 @@ def seed(session: Session) -> None:
         for supplier_index, supplier_name in enumerate(["POINT.P TEST", "GEDIMAT TEST"]):
             supplier = session.scalar(select(Supplier).where(Supplier.name == supplier_name))
             if supplier is None:
-                supplier = Supplier(name=supplier_name)
+                supplier = Supplier(name=supplier_name, source_type="demo", source_key="demo")
                 session.add(supplier)
                 session.flush()
+            else:
+                supplier.source_type = supplier.source_type or "demo"
+                supplier.source_key = supplier.source_key or "demo"
             reference = f"{'PPT' if supplier_index == 0 else 'GDT'}-{index * 137:05d}"
             sp = session.scalar(
                 select(SupplierProduct).where(
@@ -135,6 +138,11 @@ def seed(session: Session) -> None:
                             stock=stock,
                             preparation_minutes=30
                             + ((index + supplier_index + agency_index) % 5) * 30,
+                            currency="EUR",
+                            tax_basis="HT",
+                            source_type="demo",
+                            source_key="demo",
+                            observed_at=SNAPSHOT_DATE,
                             created_at=SNAPSHOT_DATE,
                             updated_at=SNAPSHOT_DATE,
                         )
@@ -145,6 +153,9 @@ def seed(session: Session) -> None:
 def main() -> None:
     engine = make_engine(Settings().database_url)
     Base.metadata.create_all(engine)
+    from app.schema_ensure import ensure_schema
+
+    ensure_schema(engine)
     with Session(engine) as session:
         seed(session)
     engine.dispose()

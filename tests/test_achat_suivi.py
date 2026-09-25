@@ -81,7 +81,7 @@ def _put_line(client, chantier_id, line_key, body):
 
 
 def test_app_version_is_050():
-    assert APP_VERSION == "0.5.0"
+    assert APP_VERSION == "0.6.0"
 
 
 def test_suivi_initial_not_taken(client):
@@ -449,4 +449,4 @@ def test_ui_hooks_suivi():
     assert "inputmode=\"decimal\"" in template
     assert "liste-achat/lignes/" in js
     assert "Enregistré" in js
-    assert APP_VERSION == "0.5.0"
+    assert APP_VERSION == "0.6.0"

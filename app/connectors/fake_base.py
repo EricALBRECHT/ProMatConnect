@@ -1,12 +1,15 @@
-from app.connectors.base import ConnectorOffer, SupplierConnector
-from app.repositories.offers import OfferRepository
+from app.connectors.demo import DemoSupplierConnector
 
 
-class DatabaseFakeConnector(SupplierConnector):
-    """Simulateur local : lit uniquement les données de démonstration en base."""
+class DatabaseFakeConnector(DemoSupplierConnector):
+    """Alias historique : simulateur local alimenté par le seed de démonstration."""
 
-    def __init__(self, repository: OfferRepository):
-        self.repository = repository
+    SUPPLIER_NAME: str = ""
 
-    def get_offers(self, product_ids: list[int]) -> list[ConnectorOffer]:
-        return self.repository.for_supplier(self.supplier_name, product_ids)
+    def __init__(self, repository):
+        super().__init__(
+            repository,
+            self.SUPPLIER_NAME,
+            source_type="demo",
+            connector_prefix="demo",
+        )

@@ -29,7 +29,7 @@ def test_normal_mode_keeps_full_comparator_shell(client):
     assert 'hidden' in home.split('id="origin-summary"', 1)[1].split(">", 1)[0]
     assert 'hidden' in home.split('id="needs-summary"', 1)[1].split(">", 1)[0]
     assert 'hidden' in home.split('id="chantier-banner"', 1)[1].split(">", 1)[0]
-    assert APP_VERSION == "0.5.0"
+    assert APP_VERSION == "0.6.0"
     assert f"?v={APP_VERSION}" in home or f"v={APP_VERSION}" in home
 
 

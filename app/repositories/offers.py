@@ -20,7 +20,11 @@ class OfferRepository:
             .where(
                 Supplier.name == supplier_name,
                 SupplierProduct.active.is_(True),
+                SupplierProduct.product_id.is_not(None),
                 SupplierProduct.product_id.in_(product_ids),
+                # Agences non géolocalisées : excluses (pas de fausse distance).
+                Agency.latitude.is_not(None),
+                Agency.longitude.is_not(None),
             )
             .order_by(SupplierProduct.id, Agency.id)
         )
@@ -36,7 +40,7 @@ class OfferRepository:
                     latitude=float(agency.latitude),
                     longitude=float(agency.longitude),
                 ),
-                product_id=product.product_id,
+                product_id=int(product.product_id),
                 supplier_reference=product.supplier_reference,
                 supplier_unit=product.supplier_unit,
                 reference_quantity=product.reference_quantity,

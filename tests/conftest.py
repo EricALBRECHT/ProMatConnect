@@ -40,6 +40,9 @@ def database_url(tmp_path: Path):
 def engine(database_url):
     engine = make_engine(database_url)
     Base.metadata.create_all(engine)
+    from app.schema_ensure import ensure_schema
+
+    ensure_schema(engine)
     with Session(engine) as session:
         seed(session)
     yield engine

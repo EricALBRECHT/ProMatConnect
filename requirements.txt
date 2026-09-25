@@ -6,3 +6,4 @@ psycopg[binary]==3.3.3
 pydantic==2.12.5
 pydantic-settings==2.13.1
 Jinja2==3.1.6
+python-multipart==0.0.32

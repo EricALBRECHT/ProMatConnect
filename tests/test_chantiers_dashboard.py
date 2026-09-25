@@ -8,7 +8,7 @@ from tests.test_approvisionnement import _compare, _create, _put_appro
 
 
 def test_app_version_is_dashboard_release():
-    assert APP_VERSION == "0.5.0"
+    assert APP_VERSION == "0.6.0"
 
 
 def test_list_summary_statuses_and_material_total(client):
@@ -142,4 +142,4 @@ def test_openapi_list_uses_chantier_list_item(client):
     assert list_schema["type"] == "array"
     ref = list_schema["items"].get("$ref", "")
     assert "ChantierListItem" in ref
-    assert schema["info"]["version"] == "0.5.0"
+    assert schema["info"]["version"] == "0.6.0"
