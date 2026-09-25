@@ -7,6 +7,7 @@ from pydantic import AwareDatetime
 from app.routes.api import SessionDependency
 from app.schemas.approvisionnement import ApprovisionnementRead, ApprovisionnementWrite
 from app.schemas.chantier import ChantierListItem, ChantierRead, ChantierUpdate, ChantierWrite
+from app.schemas.shopping_list import ShoppingListRead
 from app.services.approvisionnement import ApprovisionnementService
 from app.services.chantiers import (
     ChantierConflict,
@@ -14,6 +15,7 @@ from app.services.chantiers import (
     ChantierService,
     ProductsNotFound,
 )
+from app.services.shopping_list import ShoppingListService
 
 router = APIRouter(prefix="/api/chantiers", tags=["Chantiers"])
 Result = TypeVar("Result")
@@ -64,6 +66,11 @@ def delete_chantier(
 ):
     execute(lambda: ChantierService(session).delete(chantier_id, updated_at))
     return Response(status_code=204)
+
+
+@router.get("/{chantier_id}/liste-achat", response_model=ShoppingListRead)
+def get_liste_achat(chantier_id: int, session: SessionDependency):
+    return execute(lambda: ShoppingListService(session).get(chantier_id))
 
 
 @router.get("/{chantier_id}/approvisionnement", response_model=ApprovisionnementRead)

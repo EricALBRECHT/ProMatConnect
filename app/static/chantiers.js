@@ -469,7 +469,9 @@ async function setupDetail(chantierId) {
       );
       linesBlock.append(item);
     });
-    content.replaceChildren(summary, linesBlock);
+    const shoppingLink = node("a", "Voir la liste d’achat", "button primary shopping-list-link");
+    shoppingLink.href = `/chantiers/${chantierId}/liste-achat`;
+    content.replaceChildren(summary, linesBlock, shoppingLink);
   }
 
   async function loadApprovisionnement() {

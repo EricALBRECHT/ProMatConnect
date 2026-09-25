@@ -55,4 +55,4 @@ def test_choice_confirm_copy_is_compact():
     assert "Confirmer et retourner au chantier" in home
     assert 'id="comparator-return-link"' in home
     assert "Après confirmation, retour automatique au chantier." in home
-    assert APP_VERSION == "0.3.0"
+    assert APP_VERSION == "0.4.0"

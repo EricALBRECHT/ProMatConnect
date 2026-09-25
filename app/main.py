@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -15,6 +16,7 @@ from app.routes.api import router
 from app.routes.chantiers import router as chantiers_router
 from app.services.chantiers import ChantierNotFound, ChantierService
 from app.services.geocoding import FakeGeocodingService
+from app.services.shopping_list import ShoppingListService
 from app.version import APP_VERSION
 from scripts.seed import seed
 
@@ -25,6 +27,24 @@ ROOT = Path(__file__).parent
 def _static_asset(path: str) -> str:
     """URL locale versionnée (?v=APP_VERSION) pour invalider le cache navigateur à chaque release."""
     return f"/static/{path.lstrip('/')}?v={APP_VERSION}"
+
+
+def _format_money(value) -> str:
+    if value is None:
+        return "—"
+    quantized = Decimal(str(value)).quantize(Decimal("0.01"))
+    raw = f"{quantized:,.2f}"
+    return raw.replace(",", "\u202f").replace(".", ",") + "\u00a0€"
+
+
+def _format_qty(value) -> str:
+    if value is None:
+        return "—"
+    quantized = Decimal(str(value)).normalize()
+    text = format(quantized, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text.replace(".", ",")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -56,6 +76,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
     templates = Jinja2Templates(directory=ROOT / "templates")
     templates.env.globals["static_asset"] = _static_asset
+    templates.env.filters["money"] = _format_money
+    templates.env.filters["qty"] = _format_qty
 
     @application.exception_handler(SQLAlchemyError)
     async def database_error(request: Request, exc: SQLAlchemyError):
@@ -110,6 +132,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request=request,
             name="chantier_detail.html",
             context={"nav_active": "chantiers", "chantier": chantier},
+        )
+
+    @application.get("/chantiers/{chantier_id}/liste-achat", include_in_schema=False)
+    def chantiers_liste_achat(request: Request, chantier_id: int):
+        with request.app.state.session_factory() as session:
+            try:
+                shopping_list = ShoppingListService(session).get(chantier_id)
+            except ChantierNotFound as error:
+                raise HTTPException(404, str(error)) from error
+        return templates.TemplateResponse(
+            request=request,
+            name="liste_achat.html",
+            context={
+                "nav_active": "chantiers",
+                "liste": shopping_list,
+            },
         )
 
     return application

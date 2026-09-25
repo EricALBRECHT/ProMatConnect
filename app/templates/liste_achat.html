@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}Liste d’achat — {{ liste.chantier.nom }} — ProMatConnect{% endblock %}
+{% block description %}Liste d’achat dérivée de l’approvisionnement retenu pour le chantier {{ liste.chantier.nom }}.{% endblock %}
+{% block scripts %}
+<script src="{{ static_asset('shopping_list.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<article class="shopping-list" data-shopping-list>
+  <header class="shopping-list-header print-keep">
+    <p class="eyebrow">LISTE D’ACHAT</p>
+    <h1>{{ liste.chantier.nom }}</h1>
+    {% if liste.chantier.client %}
+    <p class="shopping-meta">Client : {{ liste.chantier.client }}</p>
+    {% endif %}
+    <p class="shopping-meta">{{ liste.chantier.adresse }}</p>
+    {% if liste.chantier.date_prevue %}
+    <p class="shopping-meta muted">Date prévue : {{ liste.chantier.date_prevue }}</p>
+    {% endif %}
+
+    {% if liste.available %}
+    <p class="shopping-strategy">
+      <strong>Solution :</strong> {{ liste.strategy_title or liste.strategy_key }}
+    </p>
+    {% if liste.chosen_at %}
+    <p class="shopping-meta muted">
+      Choisie le {{ liste.chosen_at.strftime("%d/%m/%Y") }}
+      · {{ liste.price_disclaimer }}
+    </p>
+    {% else %}
+    <p class="shopping-meta muted">{{ liste.price_disclaimer }}</p>
+    {% endif %}
+    {% endif %}
+
+    <div class="shopping-actions no-print">
+      <a class="button secondary" href="/chantiers/{{ liste.chantier.id }}">
+        Retour au chantier
+      </a>
+      {% if liste.available %}
+      <button type="button" class="button secondary" id="shopping-print">
+        Imprimer
+      </button>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if not liste.available %}
+  <section class="workspace shopping-empty print-keep" aria-labelledby="shopping-empty-title">
+    <h2 id="shopping-empty-title">Aucune liste d’achat disponible.</h2>
+    <p>
+      Comparez d’abord les besoins du chantier et choisissez une solution.
+    </p>
+    <div class="form-actions no-print">
+      <a
+        class="button primary"
+        href="/?chantier_id={{ liste.chantier.id }}"
+      >
+        Comparer les prix
+      </a>
+      <a class="button secondary" href="/chantiers/{{ liste.chantier.id }}">
+        Retour au chantier
+      </a>
+    </div>
+  </section>
+  {% else %}
+
+  {% if liste.obsolete %}
+  <div class="shopping-obsolete print-keep" role="status">
+    <p>
+      <strong>⚠ Cette liste d’achat correspond à une ancienne version des besoins.</strong>
+    </p>
+    <p>
+      Les besoins du chantier ont changé depuis cette comparaison.
+    </p>
+    <p class="no-print">
+      <a
+        class="button primary"
+        href="/?chantier_id={{ liste.chantier.id }}"
+      >
+        Refaire la comparaison
+      </a>
+    </p>
+  </div>
+  {% endif %}
+
+  <div
+    class="shopping-progress no-print"
+    id="shopping-progress"
+    role="status"
+    aria-live="polite"
+    data-total="{{ liste.line_count }}"
+  >
+    <span id="shopping-progress-text">0 / {{ liste.line_count }} articles pris</span>
+    <span id="shopping-progress-done" class="shopping-complete" hidden>
+      ✓ Liste complète
+    </span>
+  </div>
+
+  {% for store in liste.stores %}
+  <section
+    class="shopping-store print-keep"
+    aria-labelledby="store-{{ store.agency_id }}-title"
+  >
+    <header class="shopping-store-header">
+      <p class="eyebrow">MAGASIN {{ store.stop_order }}</p>
+      <h2 id="store-{{ store.agency_id }}-title">
+        {% if store.name %}{{ store.name }}{% else %}{{ store.supplier }}{% endif %}
+      </h2>
+      {% if store.supplier and store.name and store.supplier not in store.name %}
+      <p class="shopping-meta">{{ store.supplier }}</p>
+      {% endif %}
+      {% if store.address %}
+      <p class="shopping-meta">{{ store.address }}</p>
+      {% endif %}
+      <p class="shopping-meta muted">
+        {% if store.distance_km is not none %}
+        {{ "%.1f"|format(store.distance_km) }} km
+        {% endif %}
+        {% if store.travel_minutes_from_previous is not none %}
+        {% if store.distance_km is not none %} · {% endif %}
+        {{ "%.0f"|format(store.travel_minutes_from_previous) }} min
+        {% if store.stop_order == 1 %} depuis le départ{% else %} depuis l’arrêt précédent{% endif %}
+        {% endif %}
+      </p>
+    </header>
+
+    <ul class="shopping-lines">
+      {% for line in store.lines %}
+      <li class="shopping-line">
+        <div class="shopping-check no-print">
+          <input
+            type="checkbox"
+            class="shopping-taken"
+            id="taken-{{ store.agency_id }}-{{ line.product_id }}-{{ loop.index }}"
+            data-shopping-taken
+          />
+          <label for="taken-{{ store.agency_id }}-{{ line.product_id }}-{{ loop.index }}">
+            Pris
+          </label>
+        </div>
+        <div class="shopping-line-body">
+          <h3 class="shopping-product">{{ line.product_name }}</h3>
+          {% if line.supplier_reference %}
+          <p class="shopping-ref">Réf. fournisseur : {{ line.supplier_reference }}</p>
+          {% endif %}
+          <dl class="shopping-facts">
+            <div>
+              <dt>Besoin chantier</dt>
+              <dd>
+                {{ line.requested_quantity|qty }}
+                {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
+              </dd>
+            </div>
+            <div>
+              <dt>À acheter</dt>
+              <dd>
+                {{ line.purchased_quantity|qty }}
+                {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
+              </dd>
+            </div>
+            {% if line.pack_size is not none %}
+            <div>
+              <dt>Conditionnement</dt>
+              <dd>
+                {{ line.pack_size|qty }}
+                {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
+                {% if line.supplier_unit %} / {{ line.supplier_unit }}{% endif %}
+              </dd>
+            </div>
+            {% endif %}
+            <div>
+              <dt>Nombre de paquets</dt>
+              <dd>{{ line.packs }}</dd>
+            </div>
+            <div>
+              <dt>Prix constaté</dt>
+              <dd>
+                {{ line.pack_price|money }}
+                {% if line.supplier_unit %} / {{ line.supplier_unit }}{% endif %}
+              </dd>
+            </div>
+            <div class="shopping-line-total">
+              <dt>Sous-total</dt>
+              <dd>{{ line.line_total|money }} HT</dd>
+            </div>
+          </dl>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+
+    <p class="shopping-store-subtotal">
+      Sous-total magasin : <strong>{{ store.subtotal|money }} HT</strong>
+    </p>
+  </section>
+  {% endfor %}
+
+  <section class="shopping-totals print-keep" aria-labelledby="shopping-totals-title">
+    <h2 id="shopping-totals-title">Résumé</h2>
+    <p class="muted">{{ liste.price_disclaimer }}{% if liste.chosen_at %} · {{ liste.chosen_at.strftime("%d/%m/%Y") }}{% endif %}</p>
+    <dl class="shopping-totals-list">
+      {% if liste.totals.material_total is not none %}
+      <div>
+        <dt>Matériaux</dt>
+        <dd>{{ liste.totals.material_total|money }} HT</dd>
+      </div>
+      {% endif %}
+      {% if liste.totals.distance_cost is not none %}
+      <div>
+        <dt>Trajet estimé</dt>
+        <dd>{{ liste.totals.distance_cost|money }}</dd>
+      </div>
+      {% endif %}
+      {% if liste.totals.time_cost is not none %}
+      <div>
+        <dt>Temps estimé</dt>
+        <dd>{{ liste.totals.time_cost|money }}</dd>
+      </div>
+      {% endif %}
+      {% if liste.totals.extra_stops_cost is not none and liste.totals.extra_stops_cost != 0 %}
+      <div>
+        <dt>Arrêts supplémentaires</dt>
+        <dd>{{ liste.totals.extra_stops_cost|money }}</dd>
+      </div>
+      {% endif %}
+      {% if liste.totals.estimated_procurement_cost is not none %}
+      <div class="shopping-grand-total">
+        <dt>Total estimé</dt>
+        <dd>{{ liste.totals.estimated_procurement_cost|money }} HT</dd>
+      </div>
+      {% endif %}
+    </dl>
+  </section>
+  {% endif %}
+</article>
+{% endblock %}
