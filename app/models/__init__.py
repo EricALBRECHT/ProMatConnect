@@ -100,6 +100,7 @@ class Offer(Timestamps, Base):
     preparation_minutes: Mapped[int] = mapped_column(Integer)
 
 
+from app.models.chantier import AchatSuiviLigne as AchatSuiviLigne  # noqa: E402
 from app.models.chantier import ApprovisionnementRetenu as ApprovisionnementRetenu  # noqa: E402
 from app.models.chantier import Chantier as Chantier  # noqa: E402
 from app.models.chantier import ChantierMaterial as ChantierMaterial  # noqa: E402

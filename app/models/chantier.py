@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -132,3 +133,61 @@ class ApprovisionnementRetenu(Timestamps, Base):
     # JSON : strategy + origin + cost_parameters (valeurs snapshotées).
     snapshot: Mapped[dict] = mapped_column(JSON)
     chantier: Mapped[Chantier] = relationship(back_populates="approvisionnement")
+    suivi_lignes: Mapped[list["AchatSuiviLigne"]] = relationship(
+        back_populates="approvisionnement",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class AchatSuiviLigne(Timestamps, Base):
+    """Suivi réel d'achat, séparé du snapshot de comparaison (immuable)."""
+
+    __tablename__ = "achat_suivi_lignes"
+    __table_args__ = (
+        UniqueConstraint(
+            "chantier_id",
+            "snapshot_token",
+            "line_key",
+            name="uq_achat_suivi_ligne",
+        ),
+        CheckConstraint(
+            "quantite_reelle IS NULL OR (quantite_reelle >= 0 AND quantite_reelle <= 1000000)",
+            name="ck_achat_quantite_reelle",
+        ),
+        CheckConstraint(
+            "prix_reel IS NULL OR (prix_reel >= 0 AND prix_reel <= 1000000)",
+            name="ck_achat_prix_reel",
+        ),
+        CheckConstraint("length(trim(line_key)) > 0", name="ck_achat_line_key"),
+        CheckConstraint("length(trim(snapshot_token)) > 0", name="ck_achat_snapshot_token"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chantier_id: Mapped[int] = mapped_column(
+        ForeignKey("chantiers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    approvisionnement_id: Mapped[int] = mapped_column(
+        ForeignKey("approvisionnements_retenus.id", ondelete="CASCADE"),
+        index=True,
+    )
+    # Jeton de la solution retenue : {appro_id}:{strategy_key}:{chosen_at ISO}.
+    # Empêche de rattacher le suivi d'une solution A aux lignes d'une solution B
+    # (l'upsert réutilise la même ligne approvisionnement).
+    snapshot_token: Mapped[str] = mapped_column(String(120))
+    # Clé stable dans le snapshot : "{agency_id}:{product_id}".
+    line_key: Mapped[str] = mapped_column(String(64))
+    pris: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Nombre de packs réellement achetés (même sémantique que strategy.lines[].packs).
+    quantite_reelle: Mapped[Decimal | None] = mapped_column(Numeric(10, 3))
+    # Prix réellement payé par pack / supplier_unit (même sémantique que pack_price).
+    prix_reel: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+    )
+    chantier: Mapped[Chantier] = relationship()
+    approvisionnement: Mapped[ApprovisionnementRetenu] = relationship(
+        back_populates="suivi_lignes"
+    )

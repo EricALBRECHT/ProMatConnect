@@ -1448,16 +1448,60 @@ select {
 .shopping-obsolete p:last-child {
   margin-bottom: 0;
 }
-.shopping-progress {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 16px;
-  padding: 12px 16px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+.shopping-save-status {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #eaf2ef;
+  font-size: 13px;
   font-weight: 650;
+}
+.shopping-save-status.is-error {
+  background: #fdeceb;
+  color: #a33930;
+}
+.shopping-block {
+  margin-top: 12px;
+}
+.shopping-block-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.shopping-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.shopping-real-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.shopping-real-fields label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.shopping-real-fields input {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+.shopping-totals-subtitle {
+  margin: 18px 0 8px;
+  font-size: 14px;
+}
+.shopping-actual-note {
+  margin: 12px 0 0;
+  font-size: 12px;
 }
 .shopping-complete {
   color: var(--green);
@@ -1593,6 +1637,9 @@ select {
   .shopping-totals,
   .shopping-empty {
     padding: 16px;
+  }
+  .shopping-real-fields {
+    grid-template-columns: 1fr;
   }
 }
 @media print {

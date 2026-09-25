@@ -7,7 +7,11 @@ from pydantic import AwareDatetime
 from app.routes.api import SessionDependency
 from app.schemas.approvisionnement import ApprovisionnementRead, ApprovisionnementWrite
 from app.schemas.chantier import ChantierListItem, ChantierRead, ChantierUpdate, ChantierWrite
-from app.schemas.shopping_list import ShoppingListRead
+from app.schemas.shopping_list import (
+    ShoppingLineTrackingRead,
+    ShoppingLineTrackingWrite,
+    ShoppingListRead,
+)
 from app.services.approvisionnement import ApprovisionnementService
 from app.services.chantiers import (
     ChantierConflict,
@@ -71,6 +75,21 @@ def delete_chantier(
 @router.get("/{chantier_id}/liste-achat", response_model=ShoppingListRead)
 def get_liste_achat(chantier_id: int, session: SessionDependency):
     return execute(lambda: ShoppingListService(session).get(chantier_id))
+
+
+@router.put(
+    "/{chantier_id}/liste-achat/lignes/{line_key}",
+    response_model=ShoppingLineTrackingRead,
+)
+def put_liste_achat_ligne(
+    chantier_id: int,
+    line_key: str,
+    payload: ShoppingLineTrackingWrite,
+    session: SessionDependency,
+):
+    return execute(
+        lambda: ShoppingListService(session).update_line(chantier_id, line_key, payload)
+    )
 
 
 @router.get("/{chantier_id}/approvisionnement", response_model=ApprovisionnementRead)

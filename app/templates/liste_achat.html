@@ -1,11 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Liste d’achat — {{ liste.chantier.nom }} — ProMatConnect{% endblock %}
-{% block description %}Liste d’achat dérivée de l’approvisionnement retenu pour le chantier {{ liste.chantier.nom }}.{% endblock %}
+{% block description %}Liste d’achat et suivi réel pour le chantier {{ liste.chantier.nom }}.{% endblock %}
 {% block scripts %}
 <script src="{{ static_asset('shopping_list.js') }}" defer></script>
 {% endblock %}
 {% block content %}
-<article class="shopping-list" data-shopping-list>
+<article
+  class="shopping-list"
+  data-shopping-list
+  data-chantier-id="{{ liste.chantier.id }}"
+  {% if liste.available %}data-line-count="{{ liste.line_count }}"{% endif %}
+>
   <header class="shopping-list-header print-keep">
     <p class="eyebrow">LISTE D’ACHAT</p>
     <h1>{{ liste.chantier.nom }}</h1>
@@ -42,6 +47,8 @@
       {% endif %}
     </div>
   </header>
+
+  <p id="shopping-save-status" class="shopping-save-status no-print" role="status" aria-live="polite" hidden></p>
 
   {% if not liste.available %}
   <section class="workspace shopping-empty print-keep" aria-labelledby="shopping-empty-title">
@@ -88,9 +95,16 @@
     role="status"
     aria-live="polite"
     data-total="{{ liste.line_count }}"
+    data-taken="{{ liste.taken_count }}"
   >
-    <span id="shopping-progress-text">0 / {{ liste.line_count }} articles pris</span>
-    <span id="shopping-progress-done" class="shopping-complete" hidden>
+    <span id="shopping-progress-text"
+      >{{ liste.taken_count }} / {{ liste.line_count }} articles pris</span
+    >
+    <span
+      id="shopping-progress-done"
+      class="shopping-complete"
+      {% if liste.taken_count != liste.line_count or liste.line_count == 0 %}hidden{% endif %}
+    >
       ✓ Liste complète
     </span>
   </div>
@@ -125,71 +139,158 @@
 
     <ul class="shopping-lines">
       {% for line in store.lines %}
-      <li class="shopping-line">
+      <li
+        class="shopping-line{% if line.suivi.pris %} is-taken{% endif %}"
+        data-line-key="{{ line.line_key }}"
+        data-packs="{{ line.packs }}"
+        data-pack-price="{{ line.pack_price }}"
+        data-line-total="{{ line.line_total }}"
+        data-updated-at="{{ line.suivi.updated_at.isoformat() if line.suivi.updated_at else '' }}"
+      >
         <div class="shopping-check no-print">
           <input
             type="checkbox"
             class="shopping-taken"
-            id="taken-{{ store.agency_id }}-{{ line.product_id }}-{{ loop.index }}"
+            id="taken-{{ line.line_key|replace(':', '-') }}"
             data-shopping-taken
+            {% if line.suivi.pris %}checked{% endif %}
           />
-          <label for="taken-{{ store.agency_id }}-{{ line.product_id }}-{{ loop.index }}">
-            Pris
-          </label>
+          <label for="taken-{{ line.line_key|replace(':', '-') }}">Pris</label>
         </div>
         <div class="shopping-line-body">
           <h3 class="shopping-product">{{ line.product_name }}</h3>
           {% if line.supplier_reference %}
           <p class="shopping-ref">Réf. fournisseur : {{ line.supplier_reference }}</p>
           {% endif %}
-          <dl class="shopping-facts">
-            <div>
-              <dt>Besoin chantier</dt>
-              <dd>
-                {{ line.requested_quantity|qty }}
-                {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
-              </dd>
+
+          <div class="shopping-block">
+            <p class="shopping-block-title">Prévu</p>
+            <dl class="shopping-facts">
+              <div>
+                <dt>Besoin chantier</dt>
+                <dd>
+                  {{ line.requested_quantity|qty }}
+                  {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
+                </dd>
+              </div>
+              <div>
+                <dt>À acheter</dt>
+                <dd>
+                  {{ line.purchased_quantity|qty }}
+                  {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
+                </dd>
+              </div>
+              {% if line.pack_size is not none %}
+              <div>
+                <dt>Conditionnement</dt>
+                <dd>
+                  {{ line.pack_size|qty }}
+                  {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
+                  {% if line.supplier_unit %} / {{ line.supplier_unit }}{% endif %}
+                </dd>
+              </div>
+              {% endif %}
+              <div>
+                <dt>Nombre de paquets</dt>
+                <dd>{{ line.packs }}</dd>
+              </div>
+              <div>
+                <dt>Prix constaté</dt>
+                <dd>
+                  {{ line.pack_price|money }}
+                  {% if line.supplier_unit %} / {{ line.supplier_unit }}{% endif %}
+                </dd>
+              </div>
+              <div class="shopping-line-total">
+                <dt>Sous-total prévu</dt>
+                <dd>{{ line.line_total|money }} HT</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="shopping-block shopping-real">
+            <p class="shopping-block-title">Réel</p>
+            <p class="shopping-hint muted no-print">
+              Prix réel = prix payé par {{ line.supplier_unit or "pack" }} (même unité que le prix constaté).
+              Quantité réelle = nombre de paquets.
+            </p>
+            <div class="shopping-real-fields no-print">
+              <div>
+                <label for="qty-{{ line.line_key|replace(':', '-') }}"
+                  >Quantité achetée (packs)</label
+                >
+                <input
+                  id="qty-{{ line.line_key|replace(':', '-') }}"
+                  class="shopping-qty"
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  max="1000000"
+                  step="0.001"
+                  data-shopping-qty
+                  value="{{ line.suivi.quantite_reelle if line.suivi.quantite_reelle is not none else '' }}"
+                />
+              </div>
+              <div>
+                <label for="price-{{ line.line_key|replace(':', '-') }}"
+                  >Prix payé / {{ line.supplier_unit or "pack" }}</label
+                >
+                <input
+                  id="price-{{ line.line_key|replace(':', '-') }}"
+                  class="shopping-price"
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  max="1000000"
+                  step="0.01"
+                  data-shopping-price
+                  value="{{ line.suivi.prix_reel if line.suivi.prix_reel is not none else '' }}"
+                />
+              </div>
             </div>
-            <div>
-              <dt>À acheter</dt>
-              <dd>
-                {{ line.purchased_quantity|qty }}
-                {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
-              </dd>
-            </div>
-            {% if line.pack_size is not none %}
-            <div>
-              <dt>Conditionnement</dt>
-              <dd>
-                {{ line.pack_size|qty }}
-                {% if line.reference_unit %} {{ line.reference_unit }}{% endif %}
-                {% if line.supplier_unit %} / {{ line.supplier_unit }}{% endif %}
-              </dd>
-            </div>
-            {% endif %}
-            <div>
-              <dt>Nombre de paquets</dt>
-              <dd>{{ line.packs }}</dd>
-            </div>
-            <div>
-              <dt>Prix constaté</dt>
-              <dd>
-                {{ line.pack_price|money }}
-                {% if line.supplier_unit %} / {{ line.supplier_unit }}{% endif %}
-              </dd>
-            </div>
-            <div class="shopping-line-total">
-              <dt>Sous-total</dt>
-              <dd>{{ line.line_total|money }} HT</dd>
-            </div>
-          </dl>
+            <dl class="shopping-facts shopping-real-summary">
+              <div>
+                <dt>Quantité achetée</dt>
+                <dd data-print-qty>
+                  {% if line.suivi.quantite_reelle is not none %}
+                  {{ line.suivi.quantite_reelle|qty }} packs
+                  {% else %}—{% endif %}
+                </dd>
+              </div>
+              <div>
+                <dt>Prix payé</dt>
+                <dd data-print-price>
+                  {% if line.suivi.prix_reel is not none %}
+                  {{ line.suivi.prix_reel|money }}
+                  {% if line.supplier_unit %} / {{ line.supplier_unit }}{% endif %}
+                  {% else %}—{% endif %}
+                </dd>
+              </div>
+              <div class="shopping-line-total">
+                <dt>Sous-total réel</dt>
+                <dd data-sous-total-reel>
+                  {% if line.suivi.sous_total_reel is not none %}
+                  {{ line.suivi.sous_total_reel|money }} HT
+                  {% else %}—{% endif %}
+                </dd>
+              </div>
+              <div>
+                <dt>Écart</dt>
+                <dd data-ecart>
+                  {% if line.suivi.ecart is not none %}
+                  {{ line.suivi.ecart|money }}
+                  {% else %}—{% endif %}
+                </dd>
+              </div>
+            </dl>
+          </div>
         </div>
       </li>
       {% endfor %}
     </ul>
 
     <p class="shopping-store-subtotal">
-      Sous-total magasin : <strong>{{ store.subtotal|money }} HT</strong>
+      Sous-total magasin (prévu) : <strong>{{ store.subtotal|money }} HT</strong>
     </p>
   </section>
   {% endfor %}
@@ -197,10 +298,12 @@
   <section class="shopping-totals print-keep" aria-labelledby="shopping-totals-title">
     <h2 id="shopping-totals-title">Résumé</h2>
     <p class="muted">{{ liste.price_disclaimer }}{% if liste.chosen_at %} · {{ liste.chosen_at.strftime("%d/%m/%Y") }}{% endif %}</p>
+
+    <h3 class="shopping-totals-subtitle">Prévision</h3>
     <dl class="shopping-totals-list">
       {% if liste.totals.material_total is not none %}
       <div>
-        <dt>Matériaux</dt>
+        <dt>Matériaux prévus</dt>
         <dd>{{ liste.totals.material_total|money }} HT</dd>
       </div>
       {% endif %}
@@ -229,6 +332,40 @@
       </div>
       {% endif %}
     </dl>
+
+    <h3 class="shopping-totals-subtitle">Achats réels</h3>
+    <dl class="shopping-totals-list" id="shopping-actual-totals">
+      <div>
+        <dt>Articles pris</dt>
+        <dd data-actual-taken>{{ liste.taken_count }} / {{ liste.line_count }}</dd>
+      </div>
+      <div>
+        <dt>Articles renseignés (qté + prix)</dt>
+        <dd data-actual-renseignes>
+          {{ liste.actual.lines_renseignees }} / {{ liste.actual.lines_total }}
+        </dd>
+      </div>
+      <div>
+        <dt>Matériaux réellement payés</dt>
+        <dd data-actual-material>
+          {% if liste.actual.material_total_renseigne is not none %}
+          {{ liste.actual.material_total_renseigne|money }} HT
+          {% else %}—{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Écart sur articles renseignés</dt>
+        <dd data-actual-ecart>
+          {% if liste.actual.ecart_materiaux_renseignes is not none %}
+          {{ liste.actual.ecart_materiaux_renseignes|money }}
+          {% else %}—{% endif %}
+        </dd>
+      </div>
+    </dl>
+    <p class="muted shopping-actual-note">
+      Le total affiché ne concerne que les lignes où quantité et prix réels sont
+      renseignés. Trajet et temps réels ne sont pas connus.
+    </p>
   </section>
   {% endif %}
 </article>
