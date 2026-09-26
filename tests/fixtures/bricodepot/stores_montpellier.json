@@ -1,0 +1,116 @@
+{
+  "data": {
+    "retailers": {
+      "items": [
+        {
+          "address": "Chemin du Grand Rondelet",
+          "address_data": {
+            "city": "LATTES",
+            "city_insee_code": "34172",
+            "coordinates": { "latitude": 43.579712, "longitude": 3.876114 },
+            "country_id": "FR",
+            "postcode": "34970",
+            "region": "Occitanie",
+            "region_id": 1,
+            "street": "Chemin du Grand Rondelet"
+          },
+          "contact_phone": "04 67 85 67 00",
+          "contact_mail": null,
+          "entity_id": 235,
+          "name": "MONTPELLIER",
+          "seller_code": "2399",
+          "distance_from_location": 3.8,
+          "url_path_full": "/magasins/montpellier"
+        },
+        {
+          "address": "Zone Industrielle",
+          "address_data": {
+            "city": "SETE",
+            "city_insee_code": "34301",
+            "coordinates": { "latitude": 43.4, "longitude": 3.7 },
+            "country_id": "FR",
+            "postcode": "34200",
+            "region": "Occitanie",
+            "region_id": 1,
+            "street": "Zone Industrielle"
+          },
+          "contact_phone": "04 00 00 00 02",
+          "contact_mail": null,
+          "entity_id": 201,
+          "name": "SETE",
+          "seller_code": "2301",
+          "distance_from_location": 25.1,
+          "url_path_full": "/magasins/sete"
+        },
+        {
+          "address": "Route Nationale",
+          "address_data": {
+            "city": "BEZIERS",
+            "city_insee_code": "34032",
+            "coordinates": { "latitude": 43.35, "longitude": 3.22 },
+            "country_id": "FR",
+            "postcode": "34500",
+            "region": "Occitanie",
+            "region_id": 1,
+            "street": "Route Nationale"
+          },
+          "contact_phone": "04 00 00 00 03",
+          "contact_mail": null,
+          "entity_id": 202,
+          "name": "BEZIERS",
+          "seller_code": "2302",
+          "distance_from_location": 55.0,
+          "url_path_full": "/magasins/beziers"
+        },
+        {
+          "address": "Avenue du Commerce",
+          "address_data": {
+            "city": "NIMES",
+            "city_insee_code": "30189",
+            "coordinates": { "latitude": 43.84, "longitude": 4.36 },
+            "country_id": "FR",
+            "postcode": "30000",
+            "region": "Occitanie",
+            "region_id": 1,
+            "street": "Avenue du Commerce"
+          },
+          "contact_phone": "04 00 00 00 04",
+          "contact_mail": null,
+          "entity_id": 203,
+          "name": "NIMES",
+          "seller_code": "2303",
+          "distance_from_location": 48.2,
+          "url_path_full": "/magasins/nimes"
+        },
+        {
+          "address": "ZA Les Portes",
+          "address_data": {
+            "city": "ALES",
+            "city_insee_code": "30007",
+            "coordinates": { "latitude": 44.12, "longitude": 4.08 },
+            "country_id": "FR",
+            "postcode": "30100",
+            "region": "Occitanie",
+            "region_id": 1,
+            "street": "ZA Les Portes"
+          },
+          "contact_phone": "04 00 00 00 05",
+          "contact_mail": null,
+          "entity_id": 204,
+          "name": "ALES",
+          "seller_code": "2304",
+          "distance_from_location": 72.5,
+          "url_path_full": "/magasins/ales"
+        }
+      ],
+      "page_info": {
+        "current_page": 1,
+        "is_spellchecked": false,
+        "page_size": 5,
+        "sort": null,
+        "total_pages": 1
+      },
+      "total_count": 5
+    }
+  }
+}

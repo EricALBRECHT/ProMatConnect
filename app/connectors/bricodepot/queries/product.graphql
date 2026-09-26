@@ -1,0 +1,103 @@
+# Source canonique partagée probes + connecteur.
+# Écraser sans commit : tools/bricodepot_query.graphql.local
+# (prioritaire uniquement pour les probes tools/)
+
+fragment PriceRangeFragment on ProductPrice {
+  discount {
+    amount_off
+    percent_off
+  }
+  final_price {
+    currency
+    value
+  }
+  regular_price {
+    currency
+    value
+  }
+}
+
+fragment ProductPriceFragment on ProductInterface {
+  uid
+  type_of_rounding_value
+  price_range {
+    minimum_price {
+      ...PriceRangeFragment
+    }
+    minimum_price_excluding_tax {
+      ...PriceRangeFragment
+    }
+    minimum_price_including_tax {
+      ...PriceRangeFragment
+    }
+    special_price_excluding_tax {
+      ...PriceRangeFragment
+    }
+    special_price_including_tax {
+      ...PriceRangeFragment
+    }
+  }
+}
+
+fragment ProductMeasurePriceFragment on ProductInterface {
+  measure_price {
+    measure_price_including_tax {
+      final_price {
+        currency
+        value
+      }
+      regular_price {
+        currency
+        value
+      }
+    }
+    measure_price_excluding_tax {
+      final_price {
+        currency
+        value
+      }
+      regular_price {
+        currency
+        value
+      }
+    }
+  }
+}
+
+fragment ProductCoreFragment on ProductInterface {
+  uid
+  id
+  name
+  sku
+  ean_code
+  sap_easier_code
+  images {
+    role
+    url
+  }
+  conditionnement_label
+  content_net_value
+  content_net_unit_label
+  stock_status
+  stock_quantity
+  is_salable
+  is_offer_available
+  is_eligible_for_click_and_collect
+  is_eligible_for_delivery(postcode: $postCode)
+  estimated_delivery_date
+}
+
+query ProductBySku(
+  $filter: ProductAttributeFilterInput
+  $currentPage: Int
+  $pageSize: Int
+  $postCode: String
+) {
+  products(filter: $filter, currentPage: $currentPage, pageSize: $pageSize) {
+    items {
+      ...ProductCoreFragment
+      ...ProductPriceFragment
+      ...ProductMeasurePriceFragment
+    }
+  }
+}

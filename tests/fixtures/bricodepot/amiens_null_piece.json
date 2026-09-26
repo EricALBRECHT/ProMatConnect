@@ -1,0 +1,57 @@
+{
+  "data": {
+    "products": {
+      "items": [
+        {
+          "uid": "MTk3ODc3",
+          "id": 197877,
+          "name": "Plaque de plâtre BA13 Standard \"Purelight\" NF - L.2,50 x l.1,20m x Ep.13mm",
+          "sku": "3334160524579",
+          "ean_code": "3334160524579",
+          "sap_easier_code": "101547595",
+          "type_of_rounding_value": null,
+          "images": [],
+          "conditionnement_label": "La pièce",
+          "content_net_value": "3.0000",
+          "content_net_unit_label": "M2",
+          "stock_status": "IN_STOCK",
+          "stock_quantity": 50,
+          "is_salable": true,
+          "is_offer_available": true,
+          "is_eligible_for_click_and_collect": false,
+          "is_eligible_for_delivery": true,
+          "estimated_delivery_date": "2026-10-01",
+          "measure_price": {
+            "measure_price_including_tax": {
+              "final_price": { "currency": "EUR", "value": 3.1 },
+              "regular_price": { "currency": "EUR", "value": 3.1 }
+            },
+            "measure_price_excluding_tax": {
+              "final_price": { "currency": "EUR", "value": 2.58 },
+              "regular_price": { "currency": "EUR", "value": 2.58 }
+            }
+          },
+          "price_range": {
+            "minimum_price": {
+              "discount": { "amount_off": null, "percent_off": null },
+              "final_price": { "currency": "EUR", "value": null },
+              "regular_price": { "currency": "EUR", "value": null }
+            },
+            "minimum_price_including_tax": {
+              "discount": { "amount_off": null, "percent_off": null },
+              "final_price": { "currency": "EUR", "value": null },
+              "regular_price": { "currency": "EUR", "value": null }
+            },
+            "minimum_price_excluding_tax": {
+              "discount": { "amount_off": null, "percent_off": null },
+              "final_price": { "currency": "EUR", "value": null },
+              "regular_price": { "currency": "EUR", "value": null }
+            },
+            "special_price_excluding_tax": null,
+            "special_price_including_tax": null
+          }
+        }
+      ]
+    }
+  }
+}

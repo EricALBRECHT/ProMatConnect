@@ -58,6 +58,7 @@ class OfferRepository:
                         latitude=lat,
                         longitude=lon,
                         external_id=agency.external_id,
+                        agency_key=f"db:{agency.id}",
                     ),
                     product_id=int(product_sp.product_id),
                     supplier_reference=product_sp.supplier_reference,

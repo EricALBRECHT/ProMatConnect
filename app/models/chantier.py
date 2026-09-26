@@ -175,7 +175,9 @@ class AchatSuiviLigne(Timestamps, Base):
     # Empêche de rattacher le suivi d'une solution A aux lignes d'une solution B
     # (l'upsert réutilise la même ligne approvisionnement).
     snapshot_token: Mapped[str] = mapped_column(String(120))
-    # Clé stable dans le snapshot : "{agency_id}:{product_id}".
+    # Clé stable dans le snapshot :
+    # - legacy DB : "{agency_id}:{product_id}"
+    # - LIVE : "{namespace}:{store_id}:{product_id}" (ex. bricodepot:10:5)
     line_key: Mapped[str] = mapped_column(String(64))
     pris: Mapped[bool] = mapped_column(Boolean, default=False)
     # Nombre de packs réellement achetés (même sémantique que strategy.lines[].packs).

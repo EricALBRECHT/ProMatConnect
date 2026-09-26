@@ -5,6 +5,25 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 
+def db_agency_key(agency_id: int) -> str:
+    """Identité globale d'une agence persistée (PK PostgreSQL)."""
+    return f"db:{int(agency_id)}"
+
+
+def live_agency_key(namespace: str, external_store_id: str | int) -> str:
+    """Identité globale d'un magasin LIVE (namespace stable sans ':')."""
+    ns = str(namespace).strip()
+    if not ns or ":" in ns:
+        raise ValueError("namespace agency_key LIVE invalide (non vide, sans ':').")
+    return f"{ns}:{external_store_id}"
+
+
+def resolve_agency_key(*, agency_key: str | None, agency_id: int) -> str:
+    """Fallback legacy : sans agency_key → db:{agency_id}."""
+    text = (agency_key or "").strip()
+    return text if text else db_agency_key(agency_id)
+
+
 class AgencyData(BaseModel):
     """Agence magasin (coords) ou point national de catalogue (coords absentes)."""
 
@@ -18,6 +37,17 @@ class AgencyData(BaseModel):
     longitude: float | None = None
     # Identifiant magasin fournisseur ; vide = catalogue national (convention import CSV).
     external_id: str | None = None
+    # Identité métier globale namespacée (db:12 ou bricodepot:10). Défaut = db:{id}.
+    agency_key: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_agency_key(cls, data):
+        if isinstance(data, dict) and not (data.get("agency_key") or "").strip():
+            agency_id = data.get("id")
+            if agency_id is not None:
+                data = {**data, "agency_key": db_agency_key(int(agency_id))}
+        return data
 
     @model_validator(mode="after")
     def _coords_bounds(self):

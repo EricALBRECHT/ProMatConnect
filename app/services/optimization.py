@@ -4,7 +4,7 @@ from collections.abc import Callable
 from decimal import Decimal
 from itertools import combinations
 
-from app.connectors.base import ConnectorOffer
+from app.connectors.base import ConnectorOffer, resolve_agency_key
 from app.schemas.comparison import (
     CartLine,
     ComparisonOption,
@@ -115,7 +115,10 @@ class ProcurementOptimizer:
             )
             return [single, minimum, compromise], None
 
-        agencies = {offer.agency.id: offer.agency for offer in geo_eligible}
+        agencies = {
+            resolve_agency_key(agency_key=offer.agency.agency_key, agency_id=offer.agency.id): offer.agency
+            for offer in geo_eligible
+        }
         if len(agencies) > self.max_agencies:
             raise OptimizationLimitError(
                 f"L'optimiseur MVP est limité à {self.max_agencies} agences éligibles. "
@@ -127,14 +130,19 @@ class ProcurementOptimizer:
             latitude=origin.latitude,
             longitude=origin.longitude,
         )
-        route_cache: dict[tuple[int, ...], RouteResult] = {}
+        route_cache: dict[tuple[str, ...], RouteResult] = {}
         seen_allocations = set()
         candidates = []
         thresholds = sorted({offer.preparation_minutes for offer in geo_eligible})
-        agency_ids = sorted(agencies)
-        for count in range(1, len(agency_ids) + 1):
-            for subset in combinations(agency_ids, count):
-                subset_offers = [o for o in geo_eligible if o.agency.id in subset]
+        agency_keys = sorted(agencies)
+        for count in range(1, len(agency_keys) + 1):
+            for subset in combinations(agency_keys, count):
+                subset_offers = [
+                    o
+                    for o in geo_eligible
+                    if resolve_agency_key(agency_key=o.agency.agency_key, agency_id=o.agency.id)
+                    in subset
+                ]
                 if {o.product_id for o in subset_offers} != set(quantities):
                     continue
                 for threshold in thresholds:
@@ -145,23 +153,33 @@ class ProcurementOptimizer:
                         continue
                     option = option_factory(subset_at_time)
                     signature = tuple(
-                        (line.product_id, line.agency_id, line.supplier_reference)
+                        (
+                            line.product_id,
+                            resolve_agency_key(agency_key=line.agency_key, agency_id=line.agency_id),
+                            line.supplier_reference,
+                        )
                         for line in option.available
                     )
                     if signature in seen_allocations:
                         continue
                     seen_allocations.add(signature)
-                    used = tuple(sorted(agency.id for agency in option.agencies))
+                    used = tuple(
+                        sorted(
+                            resolve_agency_key(agency_key=agency.agency_key, agency_id=agency.id)
+                            for agency in option.agencies
+                        )
+                    )
                     if used not in route_cache:
                         stops = [
                             RoutePoint(
-                                key=f"agency:{i}",
-                                agency_id=i,
-                                label=agencies[i].name,
-                                latitude=agencies[i].latitude,
-                                longitude=agencies[i].longitude,
+                                key=f"agency:{akey}",
+                                agency_id=agencies[akey].id,
+                                agency_key=akey,
+                                label=agencies[akey].name,
+                                latitude=agencies[akey].latitude,
+                                longitude=agencies[akey].longitude,
                             )
-                            for i in used
+                            for akey in used
                         ]
                         route_cache[used] = self.order_optimizer.optimize(
                             origin_point, stops, self.routing
@@ -176,7 +194,10 @@ class ProcurementOptimizer:
                         option.max_preparation_minutes,
                         len(used),
                     )
-                    stop_details = {a.id: a for a in option.agencies}
+                    stop_details = {
+                        resolve_agency_key(agency_key=a.agency_key, agency_id=a.id): a
+                        for a in option.agencies
+                    }
                     candidates.append(
                         ProcurementStrategy(
                             key="candidate",
@@ -185,7 +206,13 @@ class ProcurementOptimizer:
                             explanation="",
                             material_total=option.total,
                             estimated_procurement_cost=breakdown.estimated_procurement_cost,
-                            stops=[stop_details[p.agency_id] for p in route.points[1:-1]],
+                            stops=[
+                                stop_details[
+                                    p.agency_key
+                                    or resolve_agency_key(agency_key=None, agency_id=p.agency_id)
+                                ]
+                                for p in route.points[1:-1]
+                            ],
                             supplier_count=option.supplier_count,
                             total_distance_km=distance,
                             travel_minutes=travel,
@@ -203,7 +230,10 @@ class ProcurementOptimizer:
                 candidate.material_total,
                 len(candidate.stops),
                 candidate.travel_minutes,
-                tuple(stop.id for stop in candidate.stops),
+                tuple(
+                    resolve_agency_key(agency_key=stop.agency_key, agency_id=stop.id)
+                    for stop in candidate.stops
+                ),
             )
 
         if not candidates:

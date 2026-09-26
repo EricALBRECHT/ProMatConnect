@@ -93,7 +93,7 @@ def _attach_ttc_offer(session, product_code: str, price: str, ref: str, *, unit=
 
 
 def test_app_version_catalogue_release():
-    assert APP_VERSION == "0.9.3"
+    assert APP_VERSION == "0.9.7"
 
 
 def test_admin_catalogue_page_and_assets(client):

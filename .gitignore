@@ -10,3 +10,11 @@ __pycache__/
 .coverage
 htmlcov/
 .cursor/
+
+# Probe Brico Dépôt — secrets / session locaux (ne jamais committer)
+.brico.env
+tools/bricodepot_private.json
+tools/bricodepot_query.graphql.local
+tools/bricodepot_stores_private.json
+tools/bricodepot_stores_query.graphql.local
+tools/bricodepot_raw_*.json

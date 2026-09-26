@@ -42,6 +42,8 @@ class AgencyResult(BaseModel):
     # True = agence synthétique catalogue national (pas un vrai magasin).
     # Distinct de is_geolocated=False qui peut aussi être un magasin sans coords.
     is_national_catalog: bool = False
+    # Identité métier globale (db:10 / bricodepot:10). Optionnel = snapshots anciens.
+    agency_key: str | None = None
 
 
 class SelectedLine(BaseModel):
@@ -69,6 +71,8 @@ class SelectedLine(BaseModel):
     source_price: Decimal | None = None
     source_tax_basis: str | None = None
     vat_rate: Decimal | None = None
+    # Identité métier globale de l'agence (optionnel = snapshots anciens).
+    agency_key: str | None = None
 
 
 class UnavailableLine(BaseModel):

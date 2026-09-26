@@ -1,0 +1,57 @@
+{
+  "data": {
+    "products": {
+      "items": [
+        {
+          "uid": "amiens-uid",
+          "id": 1,
+          "name": "Plaque de plâtre BA13 Standard \"Purelight\" NF - L.2,50 x l.1,20m x Ep.13mm",
+          "sku": "3334160524579",
+          "ean_code": "3334160524579",
+          "sap_easier_code": "X",
+          "type_of_rounding_value": null,
+          "images": [],
+          "conditionnement_label": "La pièce",
+          "content_net_value": "3.0000",
+          "content_net_unit_label": "M2",
+          "stock_status": "IN_STOCK",
+          "stock_quantity": 50,
+          "is_salable": true,
+          "is_offer_available": true,
+          "is_eligible_for_click_and_collect": false,
+          "is_eligible_for_delivery": true,
+          "estimated_delivery_date": null,
+          "measure_price": {
+            "measure_price_including_tax": {
+              "final_price": { "currency": "EUR", "value": 3.1 },
+              "regular_price": { "currency": "EUR", "value": 3.1 }
+            },
+            "measure_price_excluding_tax": {
+              "final_price": { "currency": "EUR", "value": 2.58 },
+              "regular_price": { "currency": "EUR", "value": 2.58 }
+            }
+          },
+          "price_range": {
+            "minimum_price": {
+              "discount": { "amount_off": 0, "percent_off": 0 },
+              "final_price": { "currency": "EUR", "value": 9.3 },
+              "regular_price": { "currency": "EUR", "value": 9.3 }
+            },
+            "minimum_price_including_tax": {
+              "discount": { "amount_off": 0, "percent_off": 0 },
+              "final_price": { "currency": "EUR", "value": 9.3 },
+              "regular_price": { "currency": "EUR", "value": 9.3 }
+            },
+            "minimum_price_excluding_tax": {
+              "discount": { "amount_off": 0, "percent_off": 0 },
+              "final_price": { "currency": "EUR", "value": 7.75 },
+              "regular_price": { "currency": "EUR", "value": 7.75 }
+            },
+            "special_price_excluding_tax": null,
+            "special_price_including_tax": null
+          }
+        }
+      ]
+    }
+  }
+}

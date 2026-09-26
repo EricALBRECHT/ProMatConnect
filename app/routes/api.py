@@ -9,12 +9,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.connectors.file_csv import MAX_UPLOAD_BYTES
-from app.connectors.registry import build_connectors
+from app.connectors.registry import build_connectors, build_live_connectors
 from app.repositories.catalog import CatalogRepository
 from app.schemas.catalog import ProductCreate, ProductRead
 from app.schemas.comparison import CompareRequest, ComparisonResponse
 from app.services.comparison import ComparisonService
-from app.services.geocoding import AddressNotFound, FakeGeocodingService, GeocodingService
+from app.services.geocoding import GeocodingError, GeocodingService, build_geocoding_service
 from app.services.optimization import OptimizationLimitError
 from app.services.origin import OriginService
 from app.services.procurement_cost import CostParameters
@@ -187,8 +187,12 @@ def delete_conditioning_override(supplier_product_id: int, session: SessionDepen
         raise HTTPException(404, str(error)) from error
 
 
-def get_geocoding_service() -> GeocodingService:
-    return FakeGeocodingService()
+def get_geocoding_service(request: Request) -> GeocodingService:
+    settings = request.app.state.settings
+    return build_geocoding_service(
+        settings.geocoding_provider,
+        timeout=settings.geocoding_timeout_s,
+    )
 
 
 def get_routing_service() -> RoutingService:
@@ -214,8 +218,12 @@ def compare(
     settings = request.app.state.settings
     try:
         origin = OriginService(settings, geocoder).resolve(payload.origin)
+        connectors = [
+            *build_connectors(session),
+            *build_live_connectors(session, resolved_origin=origin, settings=settings),
+        ]
         return ComparisonService(
-            build_connectors(session),
+            connectors,
             origin.latitude,
             origin.longitude,
             origin=origin,
@@ -228,18 +236,24 @@ def compare(
             max_agencies=settings.optimizer_max_agencies,
             tax_basis=payload.tax_basis,
         ).compare(payload.lines, products)
-    except (AddressNotFound, OptimizationLimitError) as error:
+    except (GeocodingError, OptimizationLimitError) as error:
         raise HTTPException(422, str(error)) from error
 
 
 @router.get("/health", tags=["Exploitation"])
-def health(session: SessionDependency):
+def health(request: Request, session: SessionDependency):
     session.execute(text("SELECT 1"))
+    settings = request.app.state.settings
+    data_sources = ["demo", "file"]
+    if settings.bricodepot_live_enabled:
+        data_sources.append("bricodepot_live")
     return {
         "status": "ok",
         "version": APP_VERSION,
         "mode": "catalog",
-        "data_sources": ["demo", "file"],
+        "data_sources": data_sources,
+        "geocoding_provider": settings.geocoding_provider,
+        "bricodepot_live_enabled": bool(settings.bricodepot_live_enabled),
     }
 
 

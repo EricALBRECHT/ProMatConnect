@@ -100,6 +100,9 @@ def test_geocoding_and_routing_can_be_replaced_without_changing_engine(client):
         def geocode(self, address):
             return Coordinates(latitude=48.8566, longitude=2.3522)
 
+        def reverse(self, latitude, longitude):
+            return Coordinates(latitude=latitude, longitude=longitude)
+
     class AlternativeRouter(FakeRoutingService):
         provider = "test_router"
 

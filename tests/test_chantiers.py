@@ -349,6 +349,28 @@ def test_create_all_is_additive_on_preexisting_schema(database_url):
 
     engine = make_engine(database_url)
     old_models = [Product, Supplier, Agency, SupplierProduct, Offer]
+    old_table_names = {m.__tablename__ for m in old_models}
+    # Tables absentes du schéma « ancien » : dérivées de metadata, pas d'un compteur magique.
+    expected_new_tables = set(Base.metadata.tables) - old_table_names
+    # Garde-fous métier explicites (chantiers + cache live + imports).
+    required_new_tables = {
+        "chantiers",
+        "chantier_materials",
+        "approvisionnements_retenus",
+        "achat_suivi_lignes",
+        "supplier_imports",
+        "supplier_store_cache",
+        "supplier_offer_cache",
+    }
+    assert required_new_tables <= expected_new_tables
+
+    def schema_ddl(statements: list[str]) -> list[str]:
+        return [
+            s.strip().upper()
+            for s in statements
+            if s.strip().upper().startswith(("CREATE TABLE", "ALTER", "DROP"))
+        ]
+
     try:
         Base.metadata.create_all(engine, tables=[m.__table__ for m in old_models])
         with Session(engine) as session:
@@ -367,30 +389,33 @@ def test_create_all_is_additive_on_preexisting_schema(database_url):
                 }
 
         before = snapshot()
-        statements = []
+        statements: list[str] = []
 
         def capture(connection, cursor, statement, parameters, context, executemany):
             statements.append(statement)
 
         event.listen(engine, "before_cursor_execute", capture)
+
         Base.metadata.create_all(engine)
-        Base.metadata.create_all(engine)
-        event.remove(engine, "before_cursor_execute", capture)
+        first_ddl = schema_ddl(statements)
         assert snapshot() == before
-        assert {
-            "chantiers",
-            "chantier_materials",
-            "approvisionnements_retenus",
-            "achat_suivi_lignes",
-            "supplier_imports",
-        } <= set(inspect(engine).get_table_names())
-        ddl = [
-            s.strip().upper()
-            for s in statements
-            if s.strip().upper().startswith(("CREATE TABLE", "ALTER", "DROP"))
-        ]
-        assert len(ddl) == 5
-        assert all(s.startswith("CREATE TABLE") for s in ddl)
+        present = set(inspect(engine).get_table_names())
+        assert expected_new_tables <= present
+        assert required_new_tables <= present
+        assert set(Base.metadata.tables) <= present
+        assert first_ddl, "create_all aurait dû créer les tables manquantes"
+        assert all(s.startswith("CREATE TABLE") for s in first_ddl)
+        assert not any(s.startswith("DROP") for s in first_ddl)
+        assert not any(s.startswith("ALTER") for s in first_ddl)
+        assert len(first_ddl) == len(expected_new_tables)
+
+        statements.clear()
+        Base.metadata.create_all(engine)
+        second_ddl = schema_ddl(statements)
+        event.remove(engine, "before_cursor_execute", capture)
+
+        assert second_ddl == [], "create_all doit être idempotent (aucun DDL schéma)"
+        assert snapshot() == before
     finally:
         engine.dispose()
 

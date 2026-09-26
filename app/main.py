@@ -124,6 +124,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "company_latitude": settings.company_latitude,
                 "company_longitude": settings.company_longitude,
                 "demo_addresses": list(FakeGeocodingService.ADDRESSES),
+                "geocoding_provider": settings.geocoding_provider,
+                "bricodepot_live_enabled": settings.bricodepot_live_enabled,
             },
         )
 

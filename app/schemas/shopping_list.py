@@ -21,6 +21,7 @@ class ShoppingListLine(BaseModel):
     model_config = ConfigDict(extra="forbid")
     line_key: str
     agency_id: int
+    agency_key: str | None = None
     product_id: int
     product_name: str
     supplier_reference: str
@@ -50,6 +51,7 @@ class ShoppingListLine(BaseModel):
 class ShoppingListStore(BaseModel):
     model_config = ConfigDict(extra="forbid")
     agency_id: int
+    agency_key: str | None = None
     supplier: str
     name: str
     address: str | None = None

@@ -15,6 +15,7 @@ FROM base AS test
 USER root
 RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY tests ./tests
+COPY tools ./tools
 COPY pyproject.toml ./
 USER appuser
 CMD ["pytest", "-q", "-p", "no:cacheprovider"]

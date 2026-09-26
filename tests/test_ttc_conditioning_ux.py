@@ -367,4 +367,4 @@ def test_admin_catalogs_responsive_css_guards():
     html = Path("app/templates/admin_fournisseurs.html").read_text(encoding="utf-8")
     assert "datetime_short" in html
     assert 'class="button catalog-map"' in html
-    assert APP_VERSION == "0.9.3"
+    assert APP_VERSION == "0.9.7"

@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [2.1, 49.1]},
+      "properties": {
+        "label": "Faible score",
+        "score": 0.4,
+        "postcode": "80000",
+        "citycode": "80021",
+        "city": "Amiens"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [2.295, 49.894]},
+      "properties": {
+        "label": "Meilleur score 12 Rue de Noyon 80000 Amiens",
+        "score": 0.97,
+        "postcode": "80000",
+        "citycode": "80021",
+        "city": "Amiens"
+      }
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "data": {
+    "retailers": {
+      "items": [
+        {
+          "address": null,
+          "address_data": {
+            "city": "DIEPPE",
+            "city_insee_code": "76217",
+            "coordinates": { "latitude": null, "longitude": null },
+            "country_id": "FR",
+            "postcode": "76200",
+            "region": "Normandie",
+            "region_id": 1,
+            "street": null
+          },
+          "contact_phone": null,
+          "contact_mail": null,
+          "entity_id": 133,
+          "name": "DIEPPE",
+          "seller_code": "2362",
+          "distance_from_location": 1.2,
+          "url_path_full": "/magasins/dieppe"
+        }
+      ],
+      "page_info": {
+        "current_page": 1,
+        "page_size": 5,
+        "total_pages": 1
+      },
+      "total_count": 1
+    }
+  }
+}

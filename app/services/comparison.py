@@ -1,6 +1,6 @@
 from decimal import ROUND_CEILING, Decimal
 
-from app.connectors.base import ConnectorOffer, SupplierConnector
+from app.connectors.base import ConnectorOffer, SupplierConnector, resolve_agency_key
 from app.schemas.catalog import ProductRead
 from app.schemas.comparison import (
     AgencyResult,
@@ -215,7 +215,7 @@ class ComparisonService:
                     self._distance(o),
                     o.preparation_minutes,
                     o.supplier,
-                    o.agency.id,
+                    resolve_agency_key(agency_key=o.agency.agency_key, agency_id=o.agency.id),
                     o.supplier_reference,
                 ),
             )
@@ -226,6 +226,9 @@ class ComparisonService:
             )
             pack_price = (
                 converted_pack if converted_pack is not None else money_round(offer.price)
+            )
+            agency_key = resolve_agency_key(
+                agency_key=offer.agency.agency_key, agency_id=offer.agency.id
             )
             available.append(
                 SelectedLine(
@@ -239,6 +242,7 @@ class ComparisonService:
                     supplier_reference=offer.supplier_reference,
                     supplier_unit=offer.supplier_unit,
                     agency_id=offer.agency.id,
+                    agency_key=agency_key,
                     pack_price=pack_price,
                     line_total=line_cost(offer, line.quantity, compare_basis=tax_basis),
                     available_quantity=offer.available_quantity,
@@ -254,8 +258,9 @@ class ComparisonService:
                 )
             )
             distance = None if not offer.agency.is_geolocated else round(self._distance(offer), 2)
-            agencies[offer.agency.id] = AgencyResult(
+            agencies[agency_key] = AgencyResult(
                 id=offer.agency.id,
+                agency_key=agency_key,
                 supplier=offer.supplier,
                 name=offer.agency.name,
                 address=offer.agency.address,
@@ -284,6 +289,7 @@ class ComparisonService:
                 key=lambda a: (
                     a.distance_km is None,
                     a.distance_km if a.distance_km is not None else 0.0,
+                    a.agency_key or f"db:{a.id}",
                     a.id,
                 ),
             ),

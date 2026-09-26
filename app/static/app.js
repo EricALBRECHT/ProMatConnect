@@ -133,6 +133,19 @@ function companyMeta() {
   };
 }
 
+/** Config serveur injectée dans le template — ne pas dupliquer les flags ici. */
+function comparatorRuntimeConfig() {
+  const el = $("comparator-meta");
+  return {
+    geocodingProvider: (el?.dataset.geocodingProvider || "fake").trim().toLowerCase(),
+    bricodepotLiveEnabled: (el?.dataset.bricodepotLiveEnabled || "false") === "true",
+  };
+}
+
+function isFakeGeocoding() {
+  return comparatorRuntimeConfig().geocodingProvider === "fake";
+}
+
 /**
  * Adresse / coords pour « Enregistrer comme chantier ».
  * Ma position → jamais d'adresse inventée ni de coords GPS comme faux chantier.
@@ -416,7 +429,8 @@ function applySiteOriginFromChantier(chantier) {
     return;
   }
   siteCoordinates = null;
-  siteAddressNeedsConfirmation = !isKnownDemoAddress(chantier.adresse || "");
+  siteAddressNeedsConfirmation =
+    isFakeGeocoding() && !isKnownDemoAddress(chantier.adresse || "");
 }
 
 async function loadChantierFromQuery() {
@@ -458,7 +472,7 @@ async function loadChantierFromQuery() {
     invalidate();
     renderProducts();
     renderCart();
-    if (siteAddressNeedsConfirmation) {
+    if (siteAddressNeedsConfirmation && isFakeGeocoding()) {
       status(
         "Adresse du chantier inconnue du géocodeur de démonstration. " +
           "Choisissez une adresse de test proposée ou Ma position avant de comparer.",
@@ -509,6 +523,143 @@ $("example").addEventListener("click", () => {
   invalidate();
   renderCart();
 });
+
+function sameAgency(line, stop) {
+  if (line?.agency_key && stop?.agency_key) {
+    return line.agency_key === stop.agency_key;
+  }
+  return line?.agency_id === stop?.id;
+}
+
+function findAgencyForLine(agencies, line) {
+  return (agencies || []).find((a) => sameAgency(line, a));
+}
+
+function formatSupplierDisplayName(raw) {
+  const spaced = String(raw || "")
+    .replaceAll("_", " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!spaced) return "";
+  if (spaced.toLocaleUpperCase("fr") === "BRICO DEPOT") return "Brico Dépôt";
+  return spaced;
+}
+
+function formatOptionTitle(title) {
+  const text = String(title || "");
+  const match = text.match(/^(Tout chez)\s+(.+)$/i);
+  if (!match) return text;
+  return `${match[1]} ${formatSupplierDisplayName(match[2])}`;
+}
+
+function isBricoBrandName(raw) {
+  return (
+    String(raw || "")
+      .replaceAll("_", " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLocaleUpperCase("fr") === "BRICO DEPOT"
+  );
+}
+
+/** agency_key namespacé hors db: → offre LIVE structurée (pas le libellé enseigne). */
+function isLiveAgencyKey(agencyKey) {
+  const key = String(agencyKey || "").trim();
+  if (!key || !key.includes(":")) return false;
+  return !key.startsWith("db:");
+}
+
+function comparisonHasLiveOffers(data) {
+  for (const strategy of data.strategies || []) {
+    for (const stop of strategy.stops || []) {
+      if (isLiveAgencyKey(stop.agency_key)) return true;
+    }
+    for (const line of strategy.lines || []) {
+      if (isLiveAgencyKey(line.agency_key)) return true;
+    }
+  }
+  for (const option of data.options || []) {
+    for (const agency of option.agencies || []) {
+      if (isLiveAgencyKey(agency.agency_key)) return true;
+    }
+    for (const line of option.available || []) {
+      if (isLiveAgencyKey(line.agency_key)) return true;
+    }
+  }
+  return false;
+}
+
+function filterOptionsForDisplay(options) {
+  const list = Array.isArray(options) ? options : [];
+  const brandOf = (option) =>
+    String(option.title || "").replace(/^Tout chez\s+/i, "").trim();
+  const hasValidBrico = list.some(
+    (option) => option.valid && isBricoBrandName(brandOf(option)),
+  );
+  if (!hasValidBrico) return list;
+  // Masque la ligne historique vide (ex. BRICO_DEPOT file) si une source live
+  // équivalente est déjà complète — sans fusionner les connecteurs.
+  return list.filter(
+    (option) => !(!option.valid && isBricoBrandName(brandOf(option))),
+  );
+}
+
+function stripSupplierHtml(raw) {
+  return String(raw || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function formatAgencyAddressLines(stop) {
+  const lines = stripSupplierHtml(stop?.address);
+  const postal = String(stop?.postal_code || "").trim();
+  const cityRaw = String(stop?.city || "").trim();
+  const city =
+    cityRaw && cityRaw === cityRaw.toLocaleUpperCase("fr")
+      ? cityRaw.replace(
+          /\w+/g,
+          (w) => w.charAt(0) + w.slice(1).toLocaleLowerCase("fr"),
+        )
+      : cityRaw;
+  const blob = lines.join(" ").toLocaleLowerCase("fr");
+  const postalIn = postal && blob.includes(postal.toLocaleLowerCase("fr"));
+  const cityIn = city && blob.includes(cityRaw.toLocaleLowerCase("fr"));
+  if (postal || city) {
+    if (!(postalIn && cityIn)) {
+      if (postalIn && !cityIn && city) lines.push(city);
+      else if (cityIn && !postalIn && postal) lines.push(postal);
+      else lines.push([postal, city].filter(Boolean).join(" "));
+    }
+  }
+  const seen = new Set();
+  const out = [];
+  for (const line of lines) {
+    const key = line.replace(/\s+/g, " ").trim().toLocaleLowerCase("fr");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(line.replace(/\s+/g, " ").trim());
+  }
+  return out;
+}
+
+function agencyAddressParagraph(stop) {
+  const text = formatAgencyAddressLines(stop).join("\n");
+  const el = node("p", text || "—");
+  el.style.whiteSpace = "pre-line";
+  return el;
+}
+
+function comparisonTaxHintLabel(data) {
+  const taxLabel = data.tax_basis || "HT";
+  if (comparisonHasLiveOffers(data)) {
+    return `Données de comparaison · offres live disponibles · EUR ${taxLabel}`;
+  }
+  return `Données de comparaison · EUR ${taxLabel}`;
+}
 
 function renderStrategy(option) {
   const card = node(
@@ -561,11 +712,10 @@ function renderStrategy(option) {
     }
     return false;
   };
-  const supplierDisplay = (s) => String(s.supplier || "").replaceAll("_", " ");
   const stopHeadline = (s) =>
     isNationalCatalogStop(s)
-      ? `${supplierDisplay(s)} — Catalogue national`
-      : `${s.name} (${s.supplier})`;
+      ? `${formatSupplierDisplayName(s.supplier)} — Catalogue national`
+      : `${s.name} (${formatSupplierDisplayName(s.supplier)})`;
   const agencies = node(
     "p",
     stops.map(stopHeadline).join(" → ") || "Catalogue national (sans magasin)",
@@ -716,11 +866,11 @@ function renderStrategy(option) {
     } else {
       productsBlock.append(
         node("h4", stop.name),
-        node("p", `${stop.address}, ${stop.postal_code} ${stop.city}`),
+        agencyAddressParagraph(stop),
       );
     }
     option.lines
-      .filter((line) => line.agency_id === stop.id)
+      .filter((line) => sameAgency(line, stop))
       .forEach((line) => {
         const detail = node("div", undefined, "detail-line detail-line-product");
         const lineTax = line.tax_basis || taxLabel;
@@ -772,11 +922,19 @@ function renderStrategy(option) {
           );
         }
         detail.append(
-          node("p", `${line.supplier} · réf. ${line.supplier_reference}`),
+          node(
+            "p",
+            `${formatSupplierDisplayName(line.supplier)} · réf. ${line.supplier_reference}`,
+          ),
           node(
             "p",
             `Stock : ${number(line.available_quantity)} ${refUnit} · Préparation : ${line.preparation_minutes} min`,
           ),
+        );
+        if (isLiveAgencyKey(line.agency_key) || isLiveAgencyKey(stop.agency_key)) {
+          detail.append(node("p", "Prix et stock live", "muted offer-source-live"));
+        }
+        detail.append(
           node(
             "small",
             `Offre du ${new Date(line.updated_at).toLocaleDateString("fr-FR")}`,
@@ -794,7 +952,7 @@ function renderComparison(data) {
   lastComparison = data;
   const taxLabel = data.tax_basis || "HT";
   const taxHint = $("results-tax-label");
-  if (taxHint) taxHint.textContent = `Prix simulés · EUR ${taxLabel}`;
+  if (taxHint) taxHint.textContent = comparisonTaxHintLabel(data);
   const footerNote = $("compare-footer-note");
   if (footerNote && !document.body.classList.contains("comparator-chantier-mode")) {
     footerNote.textContent = `Prix en € ${taxLabel} · Conditionnements pris en compte`;
@@ -825,12 +983,12 @@ function renderComparison(data) {
       ),
     );
   $("legacy-results").replaceChildren(
-    ...data.options.map((option) => {
+    ...filterOptionsForDisplay(data.options).map((option) => {
       const detail = node("details");
       detail.append(
         node(
           "summary",
-          `${option.title} · ${option.valid ? money(option.total) + " " + taxLabel : "Panier incomplet"}`,
+          `${formatOptionTitle(option.title)} · ${option.valid ? money(option.total) + " " + taxLabel : "Panier incomplet"}`,
         ),
         node(
           "p",
@@ -848,7 +1006,7 @@ function renderComparison(data) {
         detail.append(
           node(
             "p",
-            `${line.product_name} · ${line.packs} × ${line.supplier_unit} · ${money(line.line_total)} ${line.tax_basis || taxLabel} · ${option.agencies.find((a) => a.id === line.agency_id).name}`,
+            `${line.product_name} · ${line.packs} × ${line.supplier_unit} · ${money(line.line_total)} ${line.tax_basis || taxLabel} · ${findAgencyForLine(option.agencies, line)?.name || "—"}`,
           ),
         ),
       );
@@ -949,7 +1107,12 @@ function selectedOrigin() {
       longitude: siteCoordinates.longitude,
     };
   }
-  if (type === "site" && siteAddressNeedsConfirmation && !isKnownDemoAddress(address)) {
+  if (
+    type === "site" &&
+    siteAddressNeedsConfirmation &&
+    isFakeGeocoding() &&
+    !isKnownDemoAddress(address)
+  ) {
     status(
       "Adresse du chantier inconnue du géocodeur de démonstration. " +
         "Choisissez une adresse de test proposée ou Ma position avant de comparer.",
@@ -968,7 +1131,7 @@ $("compare").addEventListener("click", async () => {
   const requestedRevision = revision;
   $("compare").disabled = true;
   $("results-section").hidden = true;
-  status("Comparaison des offres simulées en cours…");
+  status("Comparaison des offres en cours…");
   try {
     const response = await fetch("/api/compare", {
       method: "POST",

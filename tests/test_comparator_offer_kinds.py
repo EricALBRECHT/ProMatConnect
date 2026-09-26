@@ -189,4 +189,4 @@ def test_ui_national_vs_ungeolocated_copy():
     # Ancien libellé trompeur pour le cas national
     assert '["Point de vente", "non géolocalisé"]' not in app_js
     assert "is_national_catalog" in app_js
-    assert APP_VERSION == "0.9.3"
+    assert APP_VERSION == "0.9.7"

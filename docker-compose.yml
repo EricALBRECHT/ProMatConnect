@@ -1,6 +1,12 @@
 services:
   db:
     image: postgres:16-alpine
+    # Docker plafonne /dev/shm à 64 Mo par défaut. PostgreSQL y place
+    # segments System V (tri, hash, parallélisme) : sous charge pytest
+    # (schéma par test) → "could not resize shared memory segment" puis recovery.
+    # 512m = marge confortable pour la suite complète (web + profil test
+    # partagent ce même service db).
+    shm_size: "512m"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-promatconnect}
       POSTGRES_USER: ${POSTGRES_USER:-promatconnect}
@@ -30,6 +36,9 @@ services:
       TIME_VALUE_PER_HOUR: ${TIME_VALUE_PER_HOUR:-30.00}
       EXTRA_STOP_COST: ${EXTRA_STOP_COST:-5.00}
       OPTIMIZER_MAX_AGENCIES: ${OPTIMIZER_MAX_AGENCIES:-8}
+      GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-fake}
+      BRICODEPOT_LIVE_ENABLED: ${BRICODEPOT_LIVE_ENABLED:-false}
+      BRICODEPOT_MAX_STORES: ${BRICODEPOT_MAX_STORES:-3}
     ports:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
     depends_on:

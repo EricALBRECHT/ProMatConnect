@@ -1,0 +1,15 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [2.3, 49.9]},
+      "properties": {
+        "label": "Quelque part",
+        "score": 0.5,
+        "postcode": "80000",
+        "city": "Amiens"
+      }
+    }
+  ]
+}

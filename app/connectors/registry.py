@@ -1,10 +1,14 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.connectors.base import SupplierConnector
+from app.connectors.bricodepot.connector import BricoDepotConnector
 from app.connectors.demo import DemoSupplierConnector
 from app.models import Offer, Supplier
 from app.repositories.offers import OfferRepository
+from app.schemas.location import ResolvedOrigin
+from app.services.supplier_live_cache import SupplierLiveCacheService
 
 # Ordre historique du comparateur (options mono-fournisseur).
 _PREFERRED_ORDER = {"POINT.P TEST": 0, "GEDIMAT TEST": 1}
@@ -42,4 +46,37 @@ def build_connectors(session: Session) -> list[SupplierConnector]:
                 connector_prefix=prefix,
             )
         )
+    return connectors
+
+
+def build_live_connectors(
+    session: Session,
+    *,
+    resolved_origin: ResolvedOrigin | None,
+    settings: Settings,
+    brico_client=None,
+) -> list[SupplierConnector]:
+    """Connecteurs LIVE (Brico Dépôt, …) — désactivés par défaut.
+
+    Retourne [] si flag off, citycode absent, ou config insuffisante.
+    `brico_client` injectable pour tests offline.
+    """
+    connectors: list[SupplierConnector] = []
+    if not settings.bricodepot_live_enabled:
+        return connectors
+    citycode = (resolved_origin.citycode if resolved_origin else None) or ""
+    citycode = str(citycode).strip()
+    if not citycode:
+        return connectors
+    cache = SupplierLiveCacheService(session, settings)
+    connectors.append(
+        BricoDepotConnector(
+            session,
+            insee_code=citycode,
+            client=brico_client,
+            cache=cache,
+            settings=settings,
+            max_stores=settings.bricodepot_max_stores,
+        )
+    )
     return connectors

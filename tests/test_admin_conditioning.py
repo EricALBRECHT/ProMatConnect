@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 from sqlalchemy import select
 
-from app.models import Offer, Product, Supplier, SupplierProduct
+from app.models import Agency, Offer, Product, Supplier, SupplierProduct
 from app.models.chantier import Chantier, ChantierMaterial
 from app.repositories.offers import OfferRepository
 from app.services.supplier_import import SupplierImportService
@@ -241,3 +242,185 @@ def test_product_usage_endpoint(client, session):
     body = res.json()
     assert body["unit_editable"] is True
     assert "pièce" in body["allowed_units"]
+
+
+def _sp_without_offer(session, *, ref: str = "NO-OFFER-COND"):
+    product = session.scalar(select(Product).where(Product.code == "PMC-BA13-STD-2500X1200"))
+    supplier = session.scalar(select(Supplier).where(Supplier.name == "POINT.P TEST"))
+    assert product and supplier
+    sp = session.scalar(
+        select(SupplierProduct).where(
+            SupplierProduct.supplier_id == supplier.id,
+            SupplierProduct.supplier_reference == ref,
+        )
+    )
+    if sp is None:
+        sp = SupplierProduct(
+            product_id=product.id,
+            supplier_id=supplier.id,
+            supplier_reference=ref,
+            designation="SP sans offre test",
+            supplier_unit="plaque",
+            packaging_quantity=Decimal("1"),
+            reference_unit="pièce",
+            reference_quantity=Decimal("1"),
+            active=True,
+            correction_source=None,
+        )
+        session.add(sp)
+        session.commit()
+        session.refresh(sp)
+    else:
+        sp.supplier_unit = "plaque"
+        sp.packaging_quantity = Decimal("1")
+        sp.reference_unit = "pièce"
+        sp.reference_quantity = Decimal("1")
+        sp.correction_source = None
+        session.commit()
+    return product, sp
+
+
+def test_conditioning_persists_all_fields_and_reread(client, session):
+    product, sp = _sp_without_offer(session, ref="NO-OFFER-PERSIST")
+    before_offers = session.scalars(select(Offer).where(Offer.supplier_product_id == sp.id)).all()
+    assert before_offers == []
+
+    res = client.put(
+        f"/api/supplier-products/{sp.id}/conditioning",
+        json={
+            "supplier_unit": "plaque_test",
+            "packaging_quantity": "2.5",
+            "reference_unit": "pièce",
+            "reference_quantity": "3",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["supplier_unit"] == "plaque_test"
+    assert Decimal(body["packaging_quantity"]) == Decimal("2.5")
+    assert body["reference_unit"] == "pièce"
+    assert Decimal(body["reference_quantity"]) == Decimal("3")
+    assert body["correction_source"] == "manual"
+    assert body["has_offer"] is False
+    assert body["offers_updated"] is False
+
+    session.expire_all()
+    db_sp = session.get(SupplierProduct, sp.id)
+    assert db_sp.supplier_unit == "plaque_test"
+    assert db_sp.packaging_quantity == Decimal("2.5")
+    assert db_sp.reference_unit == "pièce"
+    assert db_sp.reference_quantity == Decimal("3")
+    assert db_sp.correction_source == "manual"
+
+    detail = client.get(f"/api/admin/catalogue/products/{product.id}").json()
+    hit = next(s for s in detail["supplier_products"] if s["supplier_product_id"] == sp.id)
+    assert hit["supplier_unit"] == "plaque_test"
+    assert Decimal(hit["packaging_quantity"]) == Decimal("2.5")
+    assert hit["reference_unit"] == "pièce"
+    assert Decimal(hit["reference_quantity"]) == Decimal("3")
+    assert hit["correction_source"] == "manual"
+    assert hit["offers"] == []
+
+    # Aucune Offer créée implicitement
+    after_offers = session.scalars(select(Offer).where(Offer.supplier_product_id == sp.id)).all()
+    assert after_offers == []
+
+
+def test_conditioning_with_offer_persists_price_tax_vat(client, session):
+    product = session.scalar(select(Product).where(Product.code == "PMC-BA13-STD-2500X1200"))
+    supplier = session.scalar(select(Supplier).where(Supplier.name == "POINT.P TEST"))
+    agency = session.scalar(select(Agency).where(Agency.supplier_id == supplier.id))
+    assert product and supplier and agency
+    sp = SupplierProduct(
+        product_id=product.id,
+        supplier_id=supplier.id,
+        supplier_reference="WITH-OFFER-TAX",
+        designation="SP avec offre",
+        supplier_unit="plaque",
+        packaging_quantity=Decimal("1"),
+        reference_unit="pièce",
+        reference_quantity=Decimal("1"),
+        active=True,
+    )
+    session.add(sp)
+    session.flush()
+    offer = Offer(
+        supplier_id=supplier.id,
+        supplier_product_id=sp.id,
+        agency_id=agency.id,
+        price=Decimal("8.00"),
+        stock=10,
+        preparation_minutes=30,
+        tax_basis="HT",
+        vat_rate=None,
+        currency="EUR",
+        source_type="demo",
+    )
+    session.add(offer)
+    session.commit()
+
+    res = client.put(
+        f"/api/supplier-products/{sp.id}/conditioning",
+        json={
+            "supplier_unit": "plaque",
+            "packaging_quantity": "1",
+            "reference_unit": "pièce",
+            "reference_quantity": "1",
+            "price": "9.50",
+            "tax_basis": "TTC",
+            "vat_rate": "20",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["has_offer"] is True
+    assert body["offers_updated"] is True
+    assert Decimal(body["price"]) == Decimal("9.50")
+    assert body["tax_basis"] == "TTC"
+    assert Decimal(body["vat_rate"]) == Decimal("20")
+
+    session.expire_all()
+    db_offer = session.get(Offer, offer.id)
+    assert db_offer.price == Decimal("9.50")
+    assert db_offer.tax_basis == "TTC"
+    assert db_offer.vat_rate == Decimal("20.00")
+
+    detail = client.get(f"/api/admin/catalogue/products/{product.id}").json()
+    hit = next(s for s in detail["supplier_products"] if s["supplier_product_id"] == sp.id)
+    assert hit["offers"]
+    assert Decimal(hit["offers"][0]["price"]) == Decimal("9.50")
+    assert hit["offers"][0]["tax_basis"] == "TTC"
+    assert Decimal(hit["offers"][0]["vat_rate"]) == Decimal("20.00")
+
+
+def test_tax_fields_without_offer_do_not_create_offer(client, session):
+    _, sp = _sp_without_offer(session, ref="NO-OFFER-TAX-IGN")
+    res = client.put(
+        f"/api/supplier-products/{sp.id}/conditioning",
+        json={
+            "supplier_unit": "plaque",
+            "packaging_quantity": "1",
+            "reference_unit": "pièce",
+            "reference_quantity": "1",
+            "price": "99.99",
+            "tax_basis": "TTC",
+            "vat_rate": "20",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["has_offer"] is False
+    assert body["offers_updated"] is False
+    assert body["price"] is None
+    assert session.scalars(select(Offer).where(Offer.supplier_product_id == sp.id)).all() == []
+
+
+def test_catalogue_conditioning_modal_payload_contract():
+    """Le front n'envoie prix/TVA que s'il existe une offre ; feedback succès présent."""
+    js = Path("app/static/admin_catalogue.js").read_text(encoding="utf-8")
+    assert "Aucune offre associée" in js
+    assert "Modifications enregistrées" in js
+    assert "hasOffer" in js
+    assert "payload.tax_basis" in js
+    assert "data-save-btn" in js
+    assert 'method="dialog"' not in js.split("catalogue-sp-form")[1].split("</dialog>")[0]

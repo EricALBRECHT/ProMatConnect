@@ -555,10 +555,16 @@ class SupplierImportService:
         )
         payload = self._conditioning_payload(sp, product, compatible)
         offer = self._latest_offers_for_sps([sp.id]).get(sp.id)
+        payload["has_offer"] = offer is not None
+        payload["offers_updated"] = bool(update_tax and offer is not None)
         if offer:
             payload["price"] = str(offer.price) if offer.price is not None else None
             payload["tax_basis"] = offer.tax_basis
             payload["vat_rate"] = str(offer.vat_rate) if offer.vat_rate is not None else None
+        else:
+            payload["price"] = None
+            payload["tax_basis"] = None
+            payload["vat_rate"] = None
         return payload
 
     def clear_conditioning_override(self, supplier_product_id: int) -> dict:

@@ -1,6 +1,10 @@
+from __future__ import annotations
+
+from typing import Any
+
 from app.config import Settings
 from app.schemas.location import OriginRequest, ResolvedOrigin
-from app.services.geocoding import GeocodingService
+from app.services.geocoding import GeocodingError, GeocodingService
 
 
 class OriginService:
@@ -26,27 +30,84 @@ class OriginService:
             "other": "Autre adresse",
         }
         if origin.type == "company":
-            return ResolvedOrigin(
-                type="company",
+            return self._from_coordinates(
+                origin_type="company",
                 label=labels[origin.type],
-                source="configuration",
-                address=self.settings.company_address,
                 latitude=self.settings.company_latitude,
                 longitude=self.settings.company_longitude,
+                address=self.settings.company_address,
+                fallback_source="configuration",
             )
         if origin.latitude is not None:
-            return ResolvedOrigin(
-                type=origin.type,
+            return self._from_coordinates(
+                origin_type=origin.type,
                 label=labels[origin.type],
-                source="coordinates",
                 latitude=origin.latitude,
                 longitude=origin.longitude,
+                address=None,
+                fallback_source="coordinates",
             )
-        coordinates = self.geocoder.geocode(origin.address)
-        return ResolvedOrigin(
-            **coordinates.model_dump(),
-            type=origin.type,
+        location = self.geocoder.geocode(origin.address)
+        return self._from_geocoding_result(
+            location,
+            origin_type=origin.type,
             label=labels[origin.type],
             address=origin.address,
-            source=self.geocoder.provider,
+        )
+
+    def _from_coordinates(
+        self,
+        *,
+        origin_type: str,
+        label: str,
+        latitude: float,
+        longitude: float,
+        address: str | None,
+        fallback_source: str,
+    ) -> ResolvedOrigin:
+        """Enrichit via reverse si possible ; soft-fail → coords seules (routing OK)."""
+        try:
+            location = self.geocoder.reverse(latitude, longitude)
+        except GeocodingError:
+            return ResolvedOrigin(
+                type=origin_type,  # type: ignore[arg-type]
+                label=label,
+                source=fallback_source,
+                address=address,
+                latitude=latitude,
+                longitude=longitude,
+            )
+        return self._from_geocoding_result(
+            location,
+            origin_type=origin_type,
+            label=label,
+            address=address or getattr(location, "address", None) or getattr(location, "label", None),
+            latitude=latitude,
+            longitude=longitude,
+            fallback_source=fallback_source,
+        )
+
+    def _from_geocoding_result(
+        self,
+        location: Any,
+        *,
+        origin_type: str,
+        label: str,
+        address: str | None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        fallback_source: str | None = None,
+    ) -> ResolvedOrigin:
+        source = getattr(location, "source", None) or fallback_source or self.geocoder.provider
+        return ResolvedOrigin(
+            type=origin_type,  # type: ignore[arg-type]
+            label=label,
+            source=source,
+            address=address,
+            latitude=latitude if latitude is not None else location.latitude,
+            longitude=longitude if longitude is not None else location.longitude,
+            city=getattr(location, "city", None),
+            postcode=getattr(location, "postcode", None),
+            citycode=getattr(location, "citycode", None),
+            score=getattr(location, "score", None),
         )

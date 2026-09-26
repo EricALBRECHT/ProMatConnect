@@ -1,0 +1,17 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [2.2957, 49.8941]},
+      "properties": {
+        "label": "Rue des Trois Cailloux 80000 Amiens",
+        "score": 0.88,
+        "postcode": "80000",
+        "citycode": "80021",
+        "city": "Amiens",
+        "type": "street"
+      }
+    }
+  ]
+}

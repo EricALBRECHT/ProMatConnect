@@ -1,0 +1,75 @@
+# Requête GraphQL Brico Dépôt — GetRetailersFromLocation (observée Firefox).
+# Écraser sans commit : tools/bricodepot_stores_query.graphql.local
+# Body HTTP = [ { query, queryVariables: { code } } ]
+
+query GetRetailersFromLocation($code: String!) {
+  retailers(
+    filter: { close_to_location: { city_insee_code: $code } }
+    pageSize: 5
+    currentPage: 1
+  ) {
+    items {
+      address
+      address_data {
+        city
+        city_insee_code
+        coordinates {
+          latitude
+          longitude
+        }
+        country_id
+        postcode
+        region
+        region_id
+        street
+      }
+      contact_phone
+      contact_mail
+      entity_id
+      information_message_data {
+        information_message_is_warning
+        information_message_text
+        information_message_text_background_color
+        information_message_title
+        information_message_tooltip_text
+      }
+      name
+      seller_code
+      opening {
+        current_end_time
+        current_timestamp
+        next_opening_day
+        next_opening_time
+        open_now
+        weekly_schedule {
+          day
+          schedule {
+            end_time
+            start_time
+          }
+        }
+      }
+      special_opening {
+        date
+        is_open
+        schedule {
+          end_time
+          start_time
+        }
+      }
+      distance_from_location
+      related_postcodes
+      product_offer_stock
+      product_offer_is_salable
+      url_path_full
+    }
+    page_info {
+      current_page
+      is_spellchecked
+      page_size
+      sort
+      total_pages
+    }
+    total_count
+  }
+}

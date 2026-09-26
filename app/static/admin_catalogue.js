@@ -38,8 +38,9 @@
     has_price: "all",
   };
   let unmappedState = { page: 1, pageSize: 25, q: "" };
-  let searchTimer = null;
   let currentProduct = null;
+  let conditioningSavedFlash = false;
+  let searchTimer = null;
 
   function esc(value) {
     return String(value ?? "")
@@ -262,6 +263,7 @@
     }
     currentProduct = data;
     detailBox.innerHTML = renderDetail(data);
+    conditioningSavedFlash = false;
     bindDetail(data);
   }
 
@@ -370,6 +372,11 @@
           <h3>Références fournisseurs (${esc((p.supplier_products || []).length)})</h3>
           <button type="button" class="button" id="attach-ref-btn">+ Rattacher une référence fournisseur</button>
         </div>
+        ${
+          conditioningSavedFlash
+            ? '<p class="ok" data-cond-saved>Modifications enregistrées.</p>'
+            : ""
+        }
         <div class="catalogue-sp-list">${spBlocks || emptyRefs}</div>
       </section>
 
@@ -404,7 +411,7 @@
       </dialog>
 
       <dialog class="map-edit-dialog" id="catalogue-sp-dialog">
-        <form method="dialog" class="map-edit-form" id="catalogue-sp-form">
+        <form class="map-edit-form" id="catalogue-sp-form" action="#" method="post">
           <h3>Modifier conditionnement / TVA</h3>
           <p class="muted" data-sp-meta></p>
           <label>Unité fournisseur <input name="supplier_unit" required maxlength="40" /></label>
@@ -415,7 +422,7 @@
             </select>
           </label>
           <label>Contenu unités besoin <input name="reference_quantity" type="number" step="0.001" min="0.001" required /></label>
-          <fieldset class="map-edit-tax">
+          <fieldset class="map-edit-tax" data-tax-fields>
             <legend>Prix source / TVA</legend>
             <label>Prix source <input name="price" type="number" step="0.01" min="0" /></label>
             <label>Base
@@ -423,12 +430,14 @@
             </label>
             <label>TVA <span class="map-edit-vat-row"><input name="vat_rate" type="number" step="0.01" min="0" max="100" /><span>%</span></span></label>
           </fieldset>
+          <p class="muted" data-no-offer-msg hidden>Aucune offre associée — prix / base / TVA non modifiables ici.</p>
           <div class="map-create-actions">
-            <button type="submit" class="button" value="save">Enregistrer</button>
-            <button type="submit" class="button secondary" value="cancel">Annuler</button>
-            <button type="submit" class="button secondary" value="clear-override" data-clear-override hidden>Lever l'override</button>
+            <button type="submit" class="button" name="intent" value="save" data-save-btn>Enregistrer</button>
+            <button type="button" class="button secondary" data-cancel-btn>Annuler</button>
+            <button type="submit" class="button secondary" name="intent" value="clear-override" data-clear-override hidden>Lever l'override</button>
           </div>
           <p class="error" data-sp-error hidden></p>
+          <p class="ok" data-sp-ok hidden>Modifications enregistrées.</p>
         </form>
       </dialog>
     `;
@@ -680,6 +689,22 @@
     const spForm = detailBox.querySelector("#catalogue-sp-form");
     let editingSp = null;
 
+    function setTaxFieldsVisible(hasOffer) {
+      const taxBox = spForm?.querySelector("[data-tax-fields]");
+      const noOffer = spForm?.querySelector("[data-no-offer-msg]");
+      if (taxBox) taxBox.hidden = !hasOffer;
+      if (noOffer) noOffer.hidden = hasOffer;
+      ["price", "tax_basis", "vat_rate"].forEach((name) => {
+        const el = spForm?.[name];
+        if (!el) return;
+        el.disabled = !hasOffer;
+        if (!hasOffer) {
+          if (name === "tax_basis") el.value = "HT";
+          else el.value = "";
+        }
+      });
+    }
+
     detailBox.querySelectorAll(".sp-edit-conditioning").forEach((btn) => {
       btn.addEventListener("click", () => {
         const id = Number(btn.dataset.spId);
@@ -691,70 +716,100 @@
         spForm.packaging_quantity.value = editingSp.packaging_quantity || "1";
         spForm.reference_unit.value = editingSp.reference_unit || product.reference_unit;
         spForm.reference_quantity.value = editingSp.reference_quantity || "1";
+        const hasOffer = (editingSp.offers || []).length > 0;
         const firstOffer = (editingSp.offers || [])[0];
-        spForm.price.value = firstOffer?.price ?? "";
-        spForm.tax_basis.value = firstOffer?.tax_basis === "TTC" ? "TTC" : "HT";
-        spForm.vat_rate.value = firstOffer?.vat_rate ?? "";
+        setTaxFieldsVisible(hasOffer);
+        if (hasOffer) {
+          spForm.price.value = firstOffer?.price ?? "";
+          spForm.tax_basis.value = firstOffer?.tax_basis === "TTC" ? "TTC" : "HT";
+          spForm.vat_rate.value = firstOffer?.vat_rate ?? "";
+        }
         const clearBtn = spForm.querySelector("[data-clear-override]");
         if (clearBtn) clearBtn.hidden = editingSp.correction_source !== "manual";
         spForm.querySelector("[data-sp-error]").hidden = true;
+        spForm.querySelector("[data-sp-ok]").hidden = true;
+        const saveBtn = spForm.querySelector("[data-save-btn]");
+        if (saveBtn) saveBtn.disabled = false;
         dialog.showModal();
       });
     });
 
+    spForm?.querySelector("[data-cancel-btn]")?.addEventListener("click", () => {
+      dialog.close();
+    });
+
     spForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
+      event.stopPropagation();
       const submitter = event.submitter;
       const err = spForm.querySelector("[data-sp-error]");
+      const okMsg = spForm.querySelector("[data-sp-ok]");
+      const saveBtn = spForm.querySelector("[data-save-btn]");
       err.hidden = true;
-      if (submitter?.value === "cancel") {
-        dialog.close();
-        return;
-      }
+      okMsg.hidden = true;
       if (!editingSp) return;
       if (submitter?.value === "clear-override") {
-        const res = await fetch(
-          `/api/supplier-products/${editingSp.supplier_product_id}/conditioning-override`,
-          { method: "DELETE" }
-        );
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          err.textContent = body.detail || "Impossible de lever l'override.";
-          err.hidden = false;
-          return;
+        if (saveBtn) saveBtn.disabled = true;
+        try {
+          const res = await fetch(
+            `/api/supplier-products/${editingSp.supplier_product_id}/conditioning-override`,
+            { method: "DELETE" }
+          );
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            err.textContent = body.detail || "Impossible de lever l'override.";
+            err.hidden = false;
+            return;
+          }
+          dialog.close();
+          openDetail(product.id, false);
+        } finally {
+          if (saveBtn) saveBtn.disabled = false;
         }
-        dialog.close();
-        openDetail(product.id, false);
         return;
       }
+
       const fd = new FormData(spForm);
-      const priceRaw = String(fd.get("price") || "").trim().replace(",", ".");
-      const vatRaw = String(fd.get("vat_rate") || "").trim().replace(",", ".");
+      const hasOffer = (editingSp.offers || []).length > 0;
       const payload = {
         supplier_unit: String(fd.get("supplier_unit") || "").trim(),
         packaging_quantity: String(fd.get("packaging_quantity") || "").trim(),
         reference_unit: String(fd.get("reference_unit") || "").trim(),
         reference_quantity: String(fd.get("reference_quantity") || "").trim(),
-        tax_basis: String(fd.get("tax_basis") || "HT"),
-        price: priceRaw === "" ? null : priceRaw,
-        vat_rate: vatRaw === "" ? null : vatRaw,
       };
-      const res = await fetch(
-        `/api/supplier-products/${editingSp.supplier_product_id}/conditioning`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        err.textContent = typeof body.detail === "string" ? body.detail : "Enregistrement impossible.";
-        err.hidden = false;
-        return;
+      // Prix / TVA uniquement s'il existe une Offer cible (jamais de création implicite).
+      if (hasOffer) {
+        const priceRaw = String(fd.get("price") || "").trim().replace(",", ".");
+        const vatRaw = String(fd.get("vat_rate") || "").trim().replace(",", ".");
+        payload.tax_basis = String(fd.get("tax_basis") || "HT");
+        payload.price = priceRaw === "" ? null : priceRaw;
+        payload.vat_rate = vatRaw === "" ? null : vatRaw;
       }
-      dialog.close();
-      openDetail(product.id, false);
+
+      if (saveBtn) saveBtn.disabled = true;
+      try {
+        const res = await fetch(
+          `/api/supplier-products/${editingSp.supplier_product_id}/conditioning`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }
+        );
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          err.textContent =
+            typeof body.detail === "string" ? body.detail : "Enregistrement impossible.";
+          err.hidden = false;
+          return;
+        }
+        okMsg.hidden = false;
+        conditioningSavedFlash = true;
+        dialog.close();
+        await openDetail(product.id, false);
+      } finally {
+        if (saveBtn) saveBtn.disabled = false;
+      }
     });
   }
 

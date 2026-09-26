@@ -1,0 +1,31 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [2.299, 49.894]},
+      "properties": {
+        "label": "1 Place Jean Catelas 80000 Amiens",
+        "score": 0.91,
+        "housenumber": "1",
+        "street": "Place Jean Catelas",
+        "postcode": "80000",
+        "citycode": "80021",
+        "city": "Amiens",
+        "type": "housenumber"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [2.301, 49.895]},
+      "properties": {
+        "label": "Place Jean Catelas 80000 Amiens",
+        "score": 0.72,
+        "postcode": "80000",
+        "citycode": "80021",
+        "city": "Amiens",
+        "type": "street"
+      }
+    }
+  ]
+}

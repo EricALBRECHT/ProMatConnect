@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.connectors.base import db_agency_key, resolve_agency_key
 from app.models.chantier import AchatSuiviLigne, utc_now
 from app.repositories.chantiers import ChantierRepository
 from app.schemas.shopping_list import (
@@ -39,19 +41,54 @@ def _pack_size(purchased: Decimal, packs: int) -> Decimal | None:
     return (purchased / Decimal(packs)).quantize(Decimal("0.001"))
 
 
-def make_line_key(agency_id: int, product_id: int) -> str:
-    """Clé stable d'une ligne snapshot : une ligne = un produit dans une agence."""
-    return f"{int(agency_id)}:{int(product_id)}"
+class ParsedLineKey(NamedTuple):
+    agency_key: str
+    product_id: int
+    agency_id: int
 
 
-def parse_line_key(line_key: str) -> tuple[int, int]:
+def make_line_key(
+    agency_id: int,
+    product_id: int,
+    agency_key: str | None = None,
+) -> str:
+    """Clé stable d'une ligne snapshot.
+
+    DB / legacy : "{agency_id}:{product_id}" (ex. 10:5)
+    LIVE namespacé : "{agency_key}:{product_id}" (ex. bricodepot:10:5)
+    """
+    key = resolve_agency_key(agency_key=agency_key, agency_id=agency_id)
+    if key.startswith("db:") or key == db_agency_key(agency_id):
+        return f"{int(agency_id)}:{int(product_id)}"
+    return f"{key}:{int(product_id)}"
+
+
+def parse_line_key(line_key: str) -> ParsedLineKey:
+    """Accepte legacy `10:5` et LIVE `bricodepot:10:5`."""
     parts = (line_key or "").split(":")
-    if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
-        raise ValueError("Clé de ligne invalide.")
-    agency_id, product_id = int(parts[0]), int(parts[1])
-    if agency_id < 1 or product_id < 1:
-        raise ValueError("Clé de ligne invalide.")
-    return agency_id, product_id
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+        agency_id, product_id = int(parts[0]), int(parts[1])
+        if agency_id < 1 or product_id < 1:
+            raise ValueError("Clé de ligne invalide.")
+        return ParsedLineKey(
+            agency_key=db_agency_key(agency_id),
+            product_id=product_id,
+            agency_id=agency_id,
+        )
+    if len(parts) >= 3 and parts[-1].isdigit():
+        product_id = int(parts[-1])
+        if product_id < 1:
+            raise ValueError("Clé de ligne invalide.")
+        agency_key = ":".join(parts[:-1])
+        store = parts[-2]
+        if not store.isdigit() or int(store) < 1:
+            raise ValueError("Clé de ligne invalide.")
+        return ParsedLineKey(
+            agency_key=agency_key,
+            product_id=product_id,
+            agency_id=int(store),
+        )
+    raise ValueError("Clé de ligne invalide.")
 
 
 def make_snapshot_token(appro) -> str:
@@ -65,34 +102,46 @@ def make_snapshot_token(appro) -> str:
 
 
 def _format_address(stop: dict) -> str | None:
-    parts = [
-        (stop.get("address") or "").strip(),
-        " ".join(
-            p
-            for p in [
-                (stop.get("postal_code") or "").strip(),
-                (stop.get("city") or "").strip(),
-            ]
-            if p
-        ).strip(),
-    ]
-    text = ", ".join(p for p in parts if p)
-    return text or None
+    from app.services.address_display import format_agency_address_lines
+
+    lines = format_agency_address_lines(
+        address=stop.get("address"),
+        postal_code=stop.get("postal_code"),
+        city=stop.get("city"),
+    )
+    return ", ".join(lines) if lines else None
 
 
-def _leg_minutes_by_agency(route: dict | None) -> dict[int, float]:
+def _stop_agency_key(stop: dict) -> str:
+    return resolve_agency_key(
+        agency_key=stop.get("agency_key"),
+        agency_id=int(stop["id"]),
+    )
+
+
+def _line_agency_key(line: dict) -> str:
+    return resolve_agency_key(
+        agency_key=line.get("agency_key"),
+        agency_id=int(line["agency_id"]),
+    )
+
+
+def _leg_minutes_by_agency(route: dict | None) -> dict[str, float]:
     if not route or not isinstance(route.get("legs"), list):
         return {}
-    result: dict[int, float] = {}
+    result: dict[str, float] = {}
     for leg in route["legs"]:
         end = leg.get("end") or {}
-        agency_id = end.get("agency_id")
-        if agency_id is None:
-            continue
         minutes = leg.get("duration_minutes")
         if minutes is None:
             continue
-        result[int(agency_id)] = float(minutes)
+        if end.get("agency_key"):
+            key = str(end["agency_key"])
+        elif end.get("agency_id") is not None:
+            key = db_agency_key(int(end["agency_id"]))
+        else:
+            continue
+        result[key] = float(minutes)
     return result
 
 
@@ -146,26 +195,34 @@ def build_shopping_list_from_snapshot(
     leg_minutes = _leg_minutes_by_agency(route)
     token = make_snapshot_token(appro)
 
-    stops_by_id = {int(s["id"]): s for s in stops if s.get("id") is not None}
-    ordered_ids: list[int] = [int(s["id"]) for s in stops if s.get("id") is not None]
+    stops_by_key: dict[str, dict] = {}
+    ordered_keys: list[str] = []
+    for stop in stops:
+        if stop.get("id") is None and not stop.get("agency_key"):
+            continue
+        akey = _stop_agency_key(stop)
+        if akey not in stops_by_key:
+            stops_by_key[akey] = stop
+            ordered_keys.append(akey)
     for line in lines:
-        agency_id = int(line["agency_id"])
-        if agency_id not in stops_by_id and agency_id not in ordered_ids:
-            ordered_ids.append(agency_id)
+        akey = _line_agency_key(line)
+        if akey not in stops_by_key and akey not in ordered_keys:
+            ordered_keys.append(akey)
 
-    lines_by_agency: dict[int, list] = {aid: [] for aid in ordered_ids}
+    lines_by_agency: dict[str, list] = {akey: [] for akey in ordered_keys}
     for line in lines:
-        agency_id = int(line["agency_id"])
-        lines_by_agency.setdefault(agency_id, []).append(line)
+        akey = _line_agency_key(line)
+        lines_by_agency.setdefault(akey, []).append(line)
 
     stores: list[ShoppingListStore] = []
     all_lines: list[ShoppingListLine] = []
-    for order, agency_id in enumerate(ordered_ids, start=1):
-        agency_lines = lines_by_agency.get(agency_id) or []
+    for order, akey in enumerate(ordered_keys, start=1):
+        agency_lines = lines_by_agency.get(akey) or []
         if not agency_lines:
             continue
-        stop = stops_by_id.get(agency_id) or {}
+        stop = stops_by_key.get(akey) or {}
         first = agency_lines[0]
+        agency_id = int(first["agency_id"])
         store_lines: list[ShoppingListLine] = []
         subtotal = Decimal("0.00")
         for raw in agency_lines:
@@ -174,7 +231,9 @@ def build_shopping_list_from_snapshot(
             line_total = _dec(raw["line_total"]) or Decimal("0.00")
             subtotal += line_total
             product_id = int(raw["product_id"])
-            key = make_line_key(agency_id, product_id)
+            line_agency_id = int(raw["agency_id"])
+            line_akey = _line_agency_key(raw)
+            key = make_line_key(line_agency_id, product_id, agency_key=line_akey)
             supplier_unit = raw.get("supplier_unit") or "pack"
             pack_size = _pack_size(purchased, packs)
             ref_qty = _dec(raw.get("reference_quantity"))
@@ -185,7 +244,8 @@ def build_shopping_list_from_snapshot(
                 pack_qty = pack_size
             item = ShoppingListLine(
                 line_key=key,
-                agency_id=agency_id,
+                agency_id=line_agency_id,
+                agency_key=line_akey,
                 product_id=product_id,
                 product_name=raw.get("product_name") or f"Produit #{product_id}",
                 supplier_reference=raw.get("supplier_reference") or "",
@@ -214,6 +274,7 @@ def build_shopping_list_from_snapshot(
         stores.append(
             ShoppingListStore(
                 agency_id=agency_id,
+                agency_key=akey,
                 supplier=stop.get("supplier") or first.get("supplier") or "",
                 name=stop.get("name") or first.get("supplier") or f"Agence {agency_id}",
                 address=_format_address(stop) if stop else None,
@@ -221,7 +282,7 @@ def build_shopping_list_from_snapshot(
                 city=stop.get("city"),
                 distance_km=stop.get("distance_km"),
                 stop_order=order,
-                travel_minutes_from_previous=leg_minutes.get(agency_id),
+                travel_minutes_from_previous=leg_minutes.get(akey),
                 lines=store_lines,
                 subtotal=subtotal,
             )
@@ -300,12 +361,13 @@ class ShoppingListService:
 
     def _snapshot_line(self, appro, line_key: str) -> dict:
         try:
-            agency_id, product_id = parse_line_key(line_key)
+            parsed = parse_line_key(line_key)
         except ValueError as error:
             raise ChantierNotFound("Ligne introuvable dans cette liste d’achat.") from error
         strategy = (appro.snapshot or {}).get("strategy") or {}
         for raw in strategy.get("lines") or []:
-            if int(raw["agency_id"]) == agency_id and int(raw["product_id"]) == product_id:
+            raw_key = _line_agency_key(raw)
+            if raw_key == parsed.agency_key and int(raw["product_id"]) == parsed.product_id:
                 return raw
         raise ChantierNotFound("Ligne introuvable dans cette liste d’achat.")
 

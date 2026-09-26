@@ -11,6 +11,22 @@ class Coordinates(BaseModel):
     longitude: float = Field(ge=-180, le=180)
 
 
+class GeocodingResult(Coordinates):
+    """Résultat structuré d'un géocodeur (direct ou inverse).
+
+    `citycode` = code INSEE commune, uniquement s'il est fourni explicitement
+    par le service — jamais dérivé du code postal.
+    """
+
+    label: str | None = None
+    address: str | None = None
+    city: str | None = None
+    postcode: str | None = None
+    citycode: str | None = None
+    score: float | None = None
+    source: str = "geocoding"
+
+
 class OriginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False)
     type: OriginType = "site"
@@ -39,12 +55,19 @@ class ResolvedOrigin(Coordinates):
     label: str
     address: str | None = None
     source: str
+    # Enrichissement optionnel (Géoplateforme) — absents si géocodeur fake / reverse soft-fail.
+    city: str | None = None
+    postcode: str | None = None
+    citycode: str | None = None
+    score: float | None = None
 
 
 class RoutePoint(Coordinates):
     key: str
     label: str
     agency_id: int | None = None
+    # Identité métier globale (db:10 / bricodepot:10) — distinct de agency_id technique.
+    agency_key: str | None = None
 
 
 class RouteLeg(BaseModel):
