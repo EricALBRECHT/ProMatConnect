@@ -119,6 +119,7 @@ def test_ttc_preserved_on_selected_lines_and_strategy():
     assert minimum.material_total == Decimal("34.27")
     assert all(line.tax_basis == "TTC" for line in minimum.lines)
     assert all(stop.is_geolocated is False for stop in minimum.stops)
+    assert all(stop.is_national_catalog is True for stop in minimum.stops)
     assert minimum.route is None
     assert minimum.total_distance_km is None
 
@@ -177,6 +178,7 @@ def test_national_stops_flagged_not_geolocated():
     minimum = next(s for s in result.strategies if s.key == "minimum_materials")
     assert len(minimum.stops) == 1
     assert minimum.stops[0].is_geolocated is False
+    assert minimum.stops[0].is_national_catalog is True
     assert minimum.stops[0].distance_km is None
     # Les stratégies trajet restent indisponibles (pas d'arrêt physique).
     assert next(s for s in result.strategies if s.key == "single_stop").valid is False
@@ -339,7 +341,8 @@ def test_ui_no_hardcoded_ht_in_retained_and_shopping():
     assert "Quantité achetée" in chantiers_js
 
     app_js = Path("app/static/app.js").read_text(encoding="utf-8")
-    assert "non géolocalisé" in app_js
+    assert "Aucun magasin associé" in app_js
+    assert "Non géolocalisée" in app_js
     assert "physicalStops" in app_js
     assert 'Arrêts", String(option.stops.length)' not in app_js
 
@@ -364,4 +367,4 @@ def test_admin_catalogs_responsive_css_guards():
     html = Path("app/templates/admin_fournisseurs.html").read_text(encoding="utf-8")
     assert "datetime_short" in html
     assert 'class="button catalog-map"' in html
-    assert APP_VERSION == "0.8.0"
+    assert APP_VERSION == "0.9.3"

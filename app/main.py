@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from app.config import Settings
 from app.database import Base, make_engine
 from app.routes.api import router
+from app.routes.admin_catalogue import router as admin_catalogue_router
 from app.routes.chantiers import router as chantiers_router
 from app.schema_ensure import ensure_schema
 from app.services.chantiers import ChantierNotFound, ChantierService
@@ -91,6 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="Comparaison B2B de matériaux — données fictives uniquement, prix en EUR HT.",
     )
     application.include_router(router)
+    application.include_router(admin_catalogue_router)
     application.include_router(chantiers_router)
     application.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
     templates = Jinja2Templates(directory=ROOT / "templates")
@@ -170,6 +172,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    @application.get("/admin/catalogue", include_in_schema=False)
+    def admin_catalogue(request: Request):
+        """Back-office catalogue Product ProMatConnect — non authentifié (à protéger)."""
+        return templates.TemplateResponse(
+            request=request,
+            name="admin_catalogue.html",
+            context={
+                "nav_active": "admin-catalogue",
+                "admin_section": "catalogue",
+                "app_version": APP_VERSION,
+                "security_note": (
+                    "Page technique sans authentification — à protéger avant toute mise en production."
+                ),
+            },
+        )
+
+    @application.get("/admin/catalogue/{product_id}", include_in_schema=False)
+    def admin_catalogue_product_page(request: Request, product_id: int):
+        return templates.TemplateResponse(
+            request=request,
+            name="admin_catalogue.html",
+            context={
+                "nav_active": "admin-catalogue",
+                "admin_section": "catalogue",
+                "product_id": product_id,
+                "app_version": APP_VERSION,
+                "security_note": (
+                    "Page technique sans authentification — à protéger avant toute mise en production."
+                ),
+            },
+        )
+
     @application.get("/admin/fournisseurs", include_in_schema=False)
     def admin_fournisseurs(request: Request):
         """Page technique d'import CSV — non authentifiée (à protéger avant production)."""
@@ -181,7 +215,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request=request,
             name="admin_fournisseurs.html",
             context={
-                "nav_active": "admin",
+                "nav_active": "admin-fournisseurs",
+                "admin_section": "fournisseurs",
                 "sources": sources,
                 "catalogs": catalogs,
                 "app_version": APP_VERSION,

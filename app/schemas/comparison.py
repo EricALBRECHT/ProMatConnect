@@ -35,10 +35,13 @@ class AgencyResult(BaseModel):
     address: str
     postal_code: str
     city: str
-    # None = catalogue national / agence non géolocalisée (pas de distance fictive).
+    # None = pas de distance (catalogue national ou magasin non géolocalisé).
     distance_km: float | None = None
-    # False pour catalogue national synthétique (ne compte pas comme arrêt physique).
+    # False si latitude/longitude absentes (national ou magasin sans coords).
     is_geolocated: bool = True
+    # True = agence synthétique catalogue national (pas un vrai magasin).
+    # Distinct de is_geolocated=False qui peut aussi être un magasin sans coords.
+    is_national_catalog: bool = False
 
 
 class SelectedLine(BaseModel):

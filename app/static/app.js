@@ -544,10 +544,31 @@ function renderStrategy(option) {
     card.append(details);
     return card;
   }
+  const stops = option.stops || [];
+  const isGeolocatedStop = (s) => {
+    if (s.is_geolocated === false) return false;
+    if (s.is_geolocated === true) return true;
+    return s.distance_km != null;
+  };
+  const isNationalCatalogStop = (s) => {
+    if (s.is_national_catalog === true) return true;
+    if (s.is_national_catalog === false) return false;
+    // Snapshots anciens sans flag : structure (pas le libellé).
+    if (s.is_geolocated === false) {
+      const hasPlace =
+        String(s.address || "").trim() || String(s.city || "").trim();
+      return !hasPlace;
+    }
+    return false;
+  };
+  const supplierDisplay = (s) => String(s.supplier || "").replaceAll("_", " ");
+  const stopHeadline = (s) =>
+    isNationalCatalogStop(s)
+      ? `${supplierDisplay(s)} — Catalogue national`
+      : `${s.name} (${s.supplier})`;
   const agencies = node(
     "p",
-    option.stops.map((s) => `${s.name} (${s.supplier})`).join(" → ") ||
-      "Catalogue national (sans magasin)",
+    stops.map(stopHeadline).join(" → ") || "Catalogue national (sans magasin)",
     "selected-agencies",
   );
   card.append(agencies);
@@ -559,32 +580,51 @@ function renderStrategy(option) {
     card.append(node("p", lastComparison.tax_basis_note, "footnote"));
   }
   const hasRoute = Boolean(option.route && option.route.points && option.route.points.length);
-  const physicalStops = (option.stops || []).filter((s) => {
-    if (s.is_geolocated === false) return false;
-    if (s.is_geolocated === true) return true;
-    return s.distance_km != null;
-  });
-  const nationalOnly = !hasRoute && physicalStops.length === 0;
+  const physicalStops = stops.filter(isGeolocatedStop);
+  const ungeolocatedStores = stops.filter(
+    (s) => !isNationalCatalogStop(s) && !isGeolocatedStop(s),
+  );
+  const nationalOnly =
+    !hasRoute && physicalStops.length === 0 && ungeolocatedStores.length === 0;
+  const storeUngolocatedOnly =
+    !hasRoute && physicalStops.length === 0 && ungeolocatedStores.length > 0;
   const metrics = node("dl", undefined, "metrics metrics-compact");
-  const metricRows = nationalOnly
-    ? [
-        ["Point de vente", "non géolocalisé"],
-        ["Trajet", "—"],
-        ["Distance", "—"],
-      ]
-    : [
-        [
-          "Trajet",
-          option.travel_minutes == null ? "—" : `${number(option.travel_minutes)} min`,
-        ],
-        [
-          "Distance",
-          option.total_distance_km == null
-            ? "—"
-            : `${number(option.total_distance_km)} km`,
-        ],
-        ["Arrêts", String(physicalStops.length)],
-      ];
+  let metricRows;
+  let routeFootnote = null;
+  if (nationalOnly) {
+    metricRows = [
+      ["Type d'offre", "Catalogue national"],
+      ["Magasin", "Aucun magasin associé"],
+      ["Trajet", "Non calculable"],
+    ];
+    routeFootnote =
+      "Prix catalogue uniquement. La disponibilité et le prix dans un magasin précis ne sont pas encore connus.";
+  } else if (storeUngolocatedOnly) {
+    metricRows = [
+      [
+        "Point de vente",
+        ungeolocatedStores.map((s) => s.name).join(", ") || "—",
+      ],
+      ["Localisation", "Non géolocalisée"],
+      ["Trajet", "Non calculable"],
+    ];
+    routeFootnote =
+      "Magasin connu mais non géolocalisé : distance et trajet non calculables. Comparaison limitée au prix matériaux.";
+  } else {
+    metricRows = [
+      [
+        "Trajet",
+        option.travel_minutes == null ? "—" : `${number(option.travel_minutes)} min`,
+      ],
+      [
+        "Distance",
+        option.total_distance_km == null
+          ? "—"
+          : `${number(option.total_distance_km)} km`,
+      ],
+      ["Arrêts", String(physicalStops.length)],
+    ];
+  }
   metricRows.forEach(([label, value]) => {
     const group = node("div");
     group.append(node("dt", label), node("dd", value));
@@ -634,14 +674,8 @@ function renderStrategy(option) {
       ),
     );
     card.append(route);
-  } else {
-    card.append(
-      node(
-        "p",
-        "Pas de trajet calculé : offre catalogue national sans magasin géolocalisé. Comparaison limitée au prix matériaux.",
-        "footnote",
-      ),
-    );
+  } else if (routeFootnote) {
+    card.append(node("p", routeFootnote, "footnote"));
   }
   const calculation = node("details");
   calculation.append(node("summary", "Comprendre le calcul"));
@@ -667,12 +701,24 @@ function renderStrategy(option) {
   calcLines.forEach((text) => calculation.append(node("p", text)));
   card.append(calculation);
   const productsBlock = node("details");
-  productsBlock.append(node("summary", "Matériaux par agence"));
+  productsBlock.append(
+    node(
+      "summary",
+      nationalOnly ? "Matériaux (catalogue national)" : "Matériaux par agence",
+    ),
+  );
   option.stops.forEach((stop) => {
-    productsBlock.append(
-      node("h4", stop.name),
-      node("p", `${stop.address}, ${stop.postal_code} ${stop.city}`),
-    );
+    if (isNationalCatalogStop(stop)) {
+      productsBlock.append(
+        node("h4", stopHeadline(stop)),
+        node("p", "Aucun magasin associé", "muted"),
+      );
+    } else {
+      productsBlock.append(
+        node("h4", stop.name),
+        node("p", `${stop.address}, ${stop.postal_code} ${stop.city}`),
+      );
+    }
     option.lines
       .filter((line) => line.agency_id === stop.id)
       .forEach((line) => {

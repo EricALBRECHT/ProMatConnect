@@ -1,0 +1,14 @@
+<nav class="admin-subnav" aria-label="Administration">
+  <a
+    href="/admin/catalogue"
+    class="admin-subnav-link{% if admin_section == 'catalogue' %} is-active{% endif %}"
+    {% if admin_section == 'catalogue' %}aria-current="page"{% endif %}
+    >Catalogue</a
+  >
+  <a
+    href="/admin/fournisseurs"
+    class="admin-subnav-link{% if admin_section == 'fournisseurs' %} is-active{% endif %}"
+    {% if admin_section == 'fournisseurs' %}aria-current="page"{% endif %}
+    >Fournisseurs / imports</a
+  >
+</nav>

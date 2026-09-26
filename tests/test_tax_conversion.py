@@ -350,4 +350,4 @@ def test_snapshot_preserves_source_tax_fields(client, session):
 
     assert "tax-basis-toggle" in Path("app/templates/index.html").read_text(encoding="utf-8")
     assert "compareTaxBasis" in Path("app/static/app.js").read_text(encoding="utf-8")
-    assert APP_VERSION.startswith("0.8.")
+    assert APP_VERSION.startswith("0.9.")

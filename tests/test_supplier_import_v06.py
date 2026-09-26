@@ -31,7 +31,7 @@ def _csv(rows: str) -> bytes:
 
 
 def test_app_version_070():
-    assert APP_VERSION == "0.8.0"
+    assert APP_VERSION == "0.9.3"
 
 
 def test_supplier_connector_interface(session):
@@ -274,6 +274,6 @@ def test_admin_page(client):
 
 def test_health_version_and_sources(client):
     body = client.get("/api/health").json()
-    assert body["version"] == "0.8.0"
+    assert body["version"] == "0.9.3"
     assert "demo" in body["data_sources"]
     assert "file" in body["data_sources"]

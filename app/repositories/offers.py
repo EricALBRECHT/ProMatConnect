@@ -16,8 +16,8 @@ class OfferRepository:
     def for_supplier(self, supplier_name: str, product_ids: list[int]) -> list[ConnectorOffer]:
         """Offres actives mappées, catalogue actif (ou démo sans catalogue).
 
-        Les agences sans coords (catalogue national) sont incluses pour le prix
-        matériaux ; elles n'inventent pas de latitude/longitude.
+        Les agences sans coords (catalogue national ou magasin non géoloc.)
+        sont incluses pour le prix matériaux ; elles n'inventent pas de lat/lng.
         Les offres dont reference_unit est incompatible avec Product sont exclues
         (aucune conversion implicite).
         """
@@ -57,6 +57,7 @@ class OfferRepository:
                         city=agency.city,
                         latitude=lat,
                         longitude=lon,
+                        external_id=agency.external_id,
                     ),
                     product_id=int(product_sp.product_id),
                     supplier_reference=product_sp.supplier_reference,

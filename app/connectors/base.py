@@ -16,6 +16,8 @@ class AgencyData(BaseModel):
     city: str
     latitude: float | None = None
     longitude: float | None = None
+    # Identifiant magasin fournisseur ; vide = catalogue national (convention import CSV).
+    external_id: str | None = None
 
     @model_validator(mode="after")
     def _coords_bounds(self):
@@ -30,6 +32,21 @@ class AgencyData(BaseModel):
     @property
     def is_geolocated(self) -> bool:
         return self.latitude is not None and self.longitude is not None
+
+    @property
+    def is_national_catalog(self) -> bool:
+        """Offre catalogue national synthétique — aucun magasin associé.
+
+        Structurel (aligné import CSV) : pas de coords ET pas d'identité magasin
+        (external_id vide ET adresse/ville vides). Ne pas se baser sur le libellé.
+        """
+        if self.is_geolocated:
+            return False
+        if (self.external_id or "").strip():
+            return False
+        if (self.address or "").strip() or (self.city or "").strip():
+            return False
+        return True
 
 
 class ConnectorOffer(BaseModel):

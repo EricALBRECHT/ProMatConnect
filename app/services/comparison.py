@@ -263,6 +263,7 @@ class ComparisonService:
                 city=offer.agency.city,
                 distance_km=distance,
                 is_geolocated=offer.agency.is_geolocated,
+                is_national_catalog=offer.agency.is_national_catalog,
             )
         subtotal = sum((line.line_total for line in available), Decimal("0.00"))
         return ComparisonOption(

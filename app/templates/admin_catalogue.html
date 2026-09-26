@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Admin catalogue — ProMatConnect{% endblock %}
+{% block description %}Back-office du catalogue Product ProMatConnect.{% endblock %}
+{% block content %}
+<section
+  class="admin-page admin-catalogue-page"
+  data-admin-catalogue
+  {% if product_id is defined and product_id %}data-product-id="{{ product_id }}"{% endif %}
+>
+  <div class="page-header">
+    <div>
+      <p class="eyebrow">Administration technique · v{{ app_version }}</p>
+      <h1>Catalogue ProMatConnect</h1>
+      <p class="lede">
+        Products normalisés, références fournisseurs, prix HT/TTC et anomalies de
+        conditionnement.
+      </p>
+    </div>
+  </div>
+
+  {% include "partials/admin_nav.html" %}
+
+  <p class="admin-security" role="note">{{ security_note }}</p>
+
+  <div id="catalogue-list-view">
+    <section class="admin-section">
+      <div class="catalogue-toolbar">
+        <label class="catalogue-search">
+          <span class="sr-only">Rechercher</span>
+          <input
+            type="search"
+            id="catalogue-q"
+            placeholder="Code, nom, catégorie… (ex. BA13)"
+            maxlength="100"
+          />
+        </label>
+        <label>
+          Catégorie
+          <select id="catalogue-category">
+            <option value="">Toutes</option>
+          </select>
+        </label>
+        <label>
+          Legacy
+          <select id="catalogue-legacy">
+            <option value="exclude" selected>Masquer</option>
+            <option value="all">Inclure</option>
+            <option value="only">Legacy seul</option>
+          </select>
+        </label>
+        <label>
+          Statut
+          <select id="catalogue-active">
+            <option value="active" selected>Actifs</option>
+            <option value="all">Tous</option>
+            <option value="inactive">Inactifs</option>
+          </select>
+        </label>
+        <label>
+          Références fournisseurs
+          <select id="catalogue-mapping" aria-label="Références fournisseurs">
+            <option value="all" selected>Toutes</option>
+            <option value="mapped">Avec référence fournisseur</option>
+            <option value="unmapped">Sans référence fournisseur</option>
+          </select>
+        </label>
+        <label>
+          Anomalies
+          <select id="catalogue-anomaly">
+            <option value="all" selected>Toutes</option>
+            <option value="with">Avec anomalie</option>
+            <option value="without">Sans anomalie</option>
+          </select>
+        </label>
+        <label>
+          Prix
+          <select id="catalogue-has-price">
+            <option value="all" selected>Tous</option>
+            <option value="with">Avec offre</option>
+            <option value="without">Sans offre</option>
+          </select>
+        </label>
+      </div>
+      <p class="catalogue-meta muted" id="catalogue-meta"></p>
+      <div class="admin-table-wrap catalogue-table-wrap">
+        <table class="admin-table catalogue-table" id="catalogue-table">
+          <thead>
+            <tr>
+              <th scope="col">Photo</th>
+              <th scope="col">Code / nom</th>
+              <th scope="col">Catégorie</th>
+              <th scope="col">Unité</th>
+              <th scope="col">Min HT</th>
+              <th scope="col">Min TTC</th>
+              <th scope="col">Réf.</th>
+              <th scope="col">Offres</th>
+              <th scope="col">Flags</th>
+            </tr>
+          </thead>
+          <tbody id="catalogue-tbody"></tbody>
+        </table>
+      </div>
+      <div class="catalogue-cards" id="catalogue-cards" aria-live="polite"></div>
+      <nav class="catalogue-pagination" id="catalogue-pagination" aria-label="Pagination"></nav>
+    </section>
+
+    <section class="admin-section" id="unmapped-section">
+      <h2>Références non rattachées</h2>
+      <p class="muted">
+        Références fournisseur qui ne correspondent encore à aucun
+        produit ProMatConnect. Elles sont exclues du comparateur jusqu’à
+        leur rattachement.
+      </p>
+      <div class="catalogue-toolbar">
+        <label class="catalogue-search">
+          <span class="sr-only">Filtrer références non rattachées</span>
+          <input type="search" id="unmapped-q" placeholder="Référence, désignation…" maxlength="100" />
+        </label>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table" id="unmapped-table">
+          <thead>
+            <tr>
+              <th scope="col">Fournisseur</th>
+              <th scope="col">Réf.</th>
+              <th scope="col">Désignation</th>
+              <th scope="col">Conditionnement</th>
+              <th scope="col">Prix source</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody id="unmapped-tbody"></tbody>
+        </table>
+      </div>
+      <div class="catalogue-cards" id="unmapped-cards"></div>
+      <nav class="catalogue-pagination" id="unmapped-pagination" aria-label="Pagination références non rattachées"></nav>
+    </section>
+  </div>
+
+  <div id="catalogue-detail-view" hidden>
+    <p><a href="/admin/catalogue" class="button secondary" id="catalogue-back">← Retour liste</a></p>
+    <div id="catalogue-detail"></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ static_asset('admin_catalogue.js') }}" defer></script>
+{% endblock %}

@@ -16,6 +16,12 @@
       {% if nav_active == 'chantiers' %}aria-current="page"{% endif %}
       >Mes chantiers</a
     >
+    <a
+      href="/admin/catalogue"
+      class="nav-link{% if nav_active and nav_active.startswith('admin') %} is-active{% endif %}"
+      {% if nav_active and nav_active.startswith('admin') %}aria-current="page"{% endif %}
+      >Admin</a
+    >
   </nav>
   <span class="demo" title="Les prix peuvent provenir de la démo ou d'un import fichier — jamais live">
     Mode données · Simulation / import

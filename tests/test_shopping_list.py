@@ -78,7 +78,7 @@ def _retain(client, strategy_key="single_stop"):
 
 
 def test_app_version_is_040():
-    assert APP_VERSION == "0.8.0"
+    assert APP_VERSION == "0.9.3"
 
 
 def test_liste_achat_without_approvisionnement(client):
