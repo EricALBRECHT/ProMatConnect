@@ -9,6 +9,11 @@ from app.services.product_mapping.primitives.dimensions import (
     extract_thickness_alone_mm,
 )
 from app.services.product_mapping.primitives.length import extract_bar_length_mm
+from app.services.product_mapping.primitives.measure import (
+    extract_dn,
+    extract_volume_ml,
+    extract_weight_g,
+)
 from app.services.product_mapping.primitives.packaging import (
     extract_lot_quantity,
     extract_piece_count,
@@ -28,11 +33,14 @@ __all__ = [
     "extract_bar_length_mm",
     "extract_diameter_length_mm",
     "extract_dimensions_mm",
+    "extract_dn",
     "extract_length_width_mm",
     "extract_lot_quantity",
     "extract_metal_profile",
     "extract_piece_count",
     "extract_thickness_alone_mm",
+    "extract_volume_ml",
+    "extract_weight_g",
     "fold",
     "normalize_profile",
     "parse_number",
