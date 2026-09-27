@@ -89,7 +89,12 @@ def test_identity_keys_declared_by_rule():
 
 
 def test_rule_registry_exposes_every_category():
-    assert registered_codes() == ("OSSATURE_PLACO", "PLAQUE_PLATRE", "VIS_PLACO")
+    assert registered_codes() == (
+        "OSSATURE_PLACO",
+        "PLAQUE_PLATRE",
+        "VIS_AGGLO",
+        "VIS_PLACO",
+    )
     assert get_rule("OSSATURE_PLACO") is OSSATURE_PLACO_RULE
     assert get_rule("PLAQUE_PLATRE") is PLAQUE_PLATRE_RULE
     assert get_rule("VIS_PLACO") is VIS_PLACO_RULE
