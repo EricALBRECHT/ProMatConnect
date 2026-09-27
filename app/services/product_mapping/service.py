@@ -18,6 +18,7 @@ from app.models import Product, Supplier, SupplierProduct
 from app.models.product_mapping import (
     ALGORITHM_VERSION_PLAQUE_V1,
     CATEGORY_PLAQUE_PLATRE,
+    CORRECTION_SOURCE_EXACT_RULE,
     EXTRACTOR_VERSION_PLAQUE_V1,
     PROPOSAL_EXACT,
     PROPOSAL_HIGH,
@@ -39,8 +40,9 @@ from app.services.product_mapping.plaque_extractor import (
     REASON_REVIEW,
     diagnose_attribute_gaps,
     extract_plaque_platre,
+    identity_attrs_sufficient,
 )
-from app.services.product_mapping.plaque_matcher import best_match
+from app.services.product_mapping.plaque_matcher import MatchResult, best_match
 
 
 PLAQUE_ATTR_DEFS: list[dict[str, Any]] = [
@@ -127,6 +129,76 @@ class MappingExample:
 
 
 @dataclass
+class ExactApplication:
+    """Proposition EXACT applicable (product_id encore NULL)."""
+
+    supplier_product_id: int
+    supplier_reference: str
+    designation: str
+    product_id: int
+    product_code: str
+    extracted: dict[str, Any]
+
+
+@dataclass
+class ApplyExactResult:
+    analysed: int = 0
+    already_mapped: int = 0
+    exact_candidates: int = 0
+    applied: int = 0
+    skipped: int = 0
+    errors: int = 0
+    dry_run: bool = True
+    applications: list[ExactApplication] = field(default_factory=list)
+    error_messages: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "analysed": self.analysed,
+            "already_mapped": self.already_mapped,
+            "exact_candidates": self.exact_candidates,
+            "applied": self.applied,
+            "skipped": self.skipped,
+            "errors": self.errors,
+            "dry_run": self.dry_run,
+            "applications": [
+                {
+                    "supplier_product_id": a.supplier_product_id,
+                    "supplier_reference": a.supplier_reference,
+                    "designation": a.designation,
+                    "product_id": a.product_id,
+                    "product_code": a.product_code,
+                    "extracted": a.extracted,
+                }
+                for a in self.applications
+            ],
+            "error_messages": self.error_messages,
+        }
+
+
+def is_exact_applicable(
+    *,
+    sp: SupplierProduct,
+    extraction_attrs: dict[str, Any],
+    match: MatchResult,
+) -> bool:
+    """True si le mapping EXACT peut être appliqué sans ambiguïté ni UNKNOWN critique."""
+    if sp.product_id is not None:
+        return False
+    if match.reason != REASON_EXACT or match.status != PROPOSAL_EXACT:
+        return False
+    if match.product_id is None or not match.product_code:
+        return False
+    # Identity complète — pas d'EXACT construit sur UNKNOWN
+    if not identity_attrs_sufficient(extraction_attrs):
+        return False
+    for key in ("length_mm", "width_mm", "thickness_mm", "type"):
+        if extraction_attrs.get(key) is None:
+            return False
+    return True
+
+
+@dataclass
 class MappingRunResult:
     """Résultat d'analyse V1.1 — compteurs + variantes + manques PMC."""
 
@@ -164,6 +236,7 @@ class MappingRunResult:
     other_types: dict[str, int] = field(default_factory=dict)
     # NO_PMC_PRODUCT regroupé par variante
     missing_pmc_by_variant: dict[str, int] = field(default_factory=dict)
+    exact_applications: list[ExactApplication] = field(default_factory=list)
     category_path_available: bool = False
     category_path_note: str = (
         "category_path Magento non persisté sur SupplierProduct — "
@@ -188,6 +261,17 @@ class MappingRunResult:
             "unmapped": self.unmapped,
             "persisted_features": self.persisted_features,
             "persisted_proposals": self.persisted_proposals,
+            "exact_applications": [
+                {
+                    "supplier_product_id": a.supplier_product_id,
+                    "supplier_reference": a.supplier_reference,
+                    "designation": a.designation,
+                    "product_id": a.product_id,
+                    "product_code": a.product_code,
+                    "extracted": a.extracted,
+                }
+                for a in self.exact_applications
+            ],
             "variants": {
                 "by_type": self.by_type,
                 "by_thickness_mm": self.by_thickness,
@@ -457,6 +541,17 @@ class ProductMappingService:
 
             if reason == REASON_EXACT:
                 result.exact += 1
+                if is_exact_applicable(sp=sp, extraction_attrs=attrs, match=match):
+                    result.exact_applications.append(
+                        ExactApplication(
+                            supplier_product_id=sp.id,
+                            supplier_reference=sp.supplier_reference,
+                            designation=(sp.designation or "")[:200],
+                            product_id=match.product_id,  # type: ignore[arg-type]
+                            product_code=match.product_code or "",
+                            extracted=dict(attrs),
+                        )
+                    )
             elif reason == REASON_HIGH:
                 result.high += 1
             elif reason == REASON_AMBIGUOUS:
@@ -509,12 +604,112 @@ class ProductMappingService:
             sp = self.session.get(SupplierProduct, sp_id)
             if sp is not None and sp.product_id != old_pid:
                 raise RuntimeError(
-                    "V1 mapping ne doit jamais modifier SupplierProduct.product_id"
+                    "Analyse dry-run ne doit jamais modifier SupplierProduct.product_id"
                 )
 
         if persist and not dry_run:
             self.session.flush()
         return result
+
+    def apply_exact_plaque_platre(
+        self,
+        *,
+        supplier_name: str = "BRICO_DEPOT",
+        dry_run: bool = True,
+    ) -> ApplyExactResult:
+        """Applique les mappings EXACT éligibles (transactionnel).
+
+        dry_run=True (défaut) : liste uniquement, aucune écriture product_id.
+        dry_run=False : écrit product_id + correction_source=exact_rule.
+        """
+        ensure_plaque_platre_category(self.session)
+        candidates = load_plaque_pmc_candidates(self.session)
+        out = ApplyExactResult(dry_run=dry_run)
+
+        supplier_ids = resolve_supplier_ids(self.session, supplier_name)
+        if not supplier_ids:
+            return out
+
+        sps = sql_plaque_candidates(self.session, supplier_ids, limit=None)
+        snapshot = {sp.id: (sp.product_id, sp.correction_source) for sp in sps}
+
+        def _run_apply() -> None:
+            for sp in sps:
+                extraction = extract_plaque_platre(designation=sp.designation or "")
+                out.analysed += 1
+                if not extraction.classified:
+                    continue
+
+                if sp.product_id is not None:
+                    out.already_mapped += 1
+                    continue
+
+                match = best_match(extraction.attributes, candidates)
+                if not is_exact_applicable(
+                    sp=sp, extraction_attrs=extraction.attributes, match=match
+                ):
+                    out.skipped += 1
+                    continue
+
+                assert match.product_id is not None and match.product_code
+                app = ExactApplication(
+                    supplier_product_id=sp.id,
+                    supplier_reference=sp.supplier_reference,
+                    designation=(sp.designation or "")[:200],
+                    product_id=match.product_id,
+                    product_code=match.product_code,
+                    extracted=dict(extraction.attributes),
+                )
+                out.exact_candidates += 1
+                out.applications.append(app)
+
+                if dry_run:
+                    continue
+
+                # Protections runtime
+                if sp.product_id is not None:
+                    out.skipped += 1
+                    out.exact_candidates -= 1
+                    out.applications.pop()
+                    continue
+                sp.product_id = match.product_id
+                sp.correction_source = CORRECTION_SOURCE_EXACT_RULE
+                out.applied += 1
+
+            if not dry_run:
+                self.session.flush()
+                # Vérif post-écriture : seuls les appliqués ont changé
+                for sp_id, (old_pid, old_src) in snapshot.items():
+                    sp = self.session.get(SupplierProduct, sp_id)
+                    if sp is None:
+                        continue
+                    applied_ids = {a.supplier_product_id for a in out.applications}
+                    if sp_id in applied_ids:
+                        if sp.product_id is None or sp.correction_source != CORRECTION_SOURCE_EXACT_RULE:
+                            raise RuntimeError(
+                                f"Application EXACT incomplète pour SP {sp_id}"
+                            )
+                    else:
+                        if sp.product_id != old_pid or sp.correction_source != old_src:
+                            raise RuntimeError(
+                                f"SP {sp_id} modifié hors périmètre EXACT"
+                            )
+
+        try:
+            if dry_run:
+                _run_apply()
+            else:
+                with self.session.begin_nested():
+                    _run_apply()
+        except Exception as exc:
+            out.errors += 1
+            out.error_messages.append(str(exc))
+            if not dry_run:
+                out.applied = 0
+                raise
+            raise
+
+        return out
 
     @staticmethod
     def _interesting_not_category(designation: str) -> bool:

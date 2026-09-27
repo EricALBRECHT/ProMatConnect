@@ -36,6 +36,14 @@ CATEGORY_PLAQUE_PLATRE = "PLAQUE_PLATRE"
 EXTRACTOR_VERSION_PLAQUE_V1 = "plaque_platre.v1"
 ALGORITHM_VERSION_PLAQUE_V1 = "plaque_match.v1"
 
+# Traçabilité SupplierProduct.correction_source (VARCHAR(20))
+CORRECTION_SOURCE_IMPORT = "import"
+CORRECTION_SOURCE_MANUAL = "manual"
+CORRECTION_SOURCE_EXACT_RULE = "exact_rule"
+CORRECTION_SOURCES_PROTECTED = frozenset(
+    {CORRECTION_SOURCE_MANUAL, CORRECTION_SOURCE_EXACT_RULE}
+)
+
 
 class ProductCategory(Base):
     """Catégorie produit PMC — hiérarchie via parent_id (nullable = racine)."""

@@ -1081,8 +1081,10 @@ class SupplierImportService:
             self.session.add(sp)
             self.session.flush()
         else:
-            # Correction manuelle : ne pas écraser mapping / conditionnement.
-            if sp.correction_source == "manual":
+            # Correction manuelle / exact_rule : ne pas écraser mapping / conditionnement.
+            from app.models.product_mapping import CORRECTION_SOURCES_PROTECTED
+
+            if sp.correction_source in CORRECTION_SOURCES_PROTECTED:
                 if offer.product.brand is not None:
                     sp.brand = offer.product.brand
                 if offer.product.ean is not None:

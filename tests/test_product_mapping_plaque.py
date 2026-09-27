@@ -800,3 +800,280 @@ def test_v14_ba13_3000x1200_exact(session):
     )
     assert m.status == PROPOSAL_EXACT
     assert m.product_code == "PMC-BA13-STD-3000X1200"
+
+
+# --- V1.5 : application contrôlée EXACT ---
+
+def test_v15_dry_run_writes_nothing(session):
+    from app.models.product_mapping import CORRECTION_SOURCE_EXACT_RULE
+    from scripts.normalized_catalog import seed_normalized_catalog
+
+    seed_normalized_catalog(session)
+    supplier = resolve_brico_supplier(session)
+    sp = SupplierProduct(
+        product_id=None,
+        supplier_id=supplier.id,
+        supplier_reference="v15dry001",
+        designation="Plaque de plâtre BA13 standard 2500 x 1200 x 13 mm",
+        supplier_unit="La pièce",
+        reference_quantity=Decimal("1"),
+        packaging_quantity=Decimal("1"),
+        correction_source="import",
+    )
+    session.add(sp)
+    session.flush()
+    svc = ProductMappingService(session)
+    preview = svc.apply_exact_plaque_platre(
+        supplier_name=supplier.name, dry_run=True
+    )
+    session.refresh(sp)
+    assert sp.product_id is None
+    assert sp.correction_source == "import"
+    assert preview.dry_run is True
+    assert preview.applied == 0
+    assert preview.exact_candidates >= 1
+    assert CORRECTION_SOURCE_EXACT_RULE == "exact_rule"
+
+
+def test_v15_exact_null_product_id_applied(session):
+    from app.models.product_mapping import CORRECTION_SOURCE_EXACT_RULE
+    from scripts.normalized_catalog import seed_normalized_catalog
+
+    seed_normalized_catalog(session)
+    session.flush()
+    product = session.scalar(
+        select(Product).where(Product.code == "PMC-BA13-STD-2500X1200")
+    )
+    assert product is not None
+    supplier = resolve_brico_supplier(session)
+    sp = SupplierProduct(
+        product_id=None,
+        supplier_id=supplier.id,
+        supplier_reference="v15apply001",
+        designation="Plaque de plâtre BA13 Standard NF - L.2,50 x l.1,20m x Ep.13mm",
+        supplier_unit="La pièce",
+        reference_quantity=Decimal("1"),
+        packaging_quantity=Decimal("1"),
+        correction_source="import",
+    )
+    session.add(sp)
+    session.flush()
+    svc = ProductMappingService(session)
+    result = svc.apply_exact_plaque_platre(
+        supplier_name=supplier.name, dry_run=False
+    )
+    session.flush()
+    session.refresh(sp)
+    assert result.applied >= 1
+    assert sp.product_id == product.id
+    assert sp.correction_source == CORRECTION_SOURCE_EXACT_RULE
+
+
+def test_v15_manual_never_overwritten(session):
+    from scripts.normalized_catalog import seed_normalized_catalog
+
+    seed_normalized_catalog(session)
+    product = session.scalar(
+        select(Product).where(Product.code == "PMC-BA13-LIGHT-2500X1200")
+    )
+    other = session.scalar(
+        select(Product).where(Product.code == "PMC-BA13-STD-2500X1200")
+    )
+    assert product and other
+    supplier = resolve_brico_supplier(session)
+    sp = SupplierProduct(
+        product_id=product.id,
+        supplier_id=supplier.id,
+        supplier_reference="v15manual001",
+        designation="Plaque de plâtre BA13 Standard NF - L.2,50 x l.1,20m x Ep.13mm",
+        supplier_unit="La pièce",
+        reference_quantity=Decimal("1"),
+        packaging_quantity=Decimal("1"),
+        correction_source="manual",
+    )
+    session.add(sp)
+    session.flush()
+    old_pid = sp.product_id
+    svc = ProductMappingService(session)
+    result = svc.apply_exact_plaque_platre(
+        supplier_name=supplier.name, dry_run=False
+    )
+    session.flush()
+    session.refresh(sp)
+    assert sp.product_id == old_pid
+    assert sp.correction_source == "manual"
+    assert result.already_mapped >= 1
+    assert all(a.supplier_product_id != sp.id for a in result.applications)
+
+
+def test_v15_existing_mapping_never_overwritten(session):
+    from scripts.normalized_catalog import seed_normalized_catalog
+
+    seed_normalized_catalog(session)
+    product = session.scalar(
+        select(Product).where(Product.code == "PMC-BA13-HYDRO-2500X1200")
+    )
+    assert product is not None
+    supplier = resolve_brico_supplier(session)
+    sp = SupplierProduct(
+        product_id=product.id,
+        supplier_id=supplier.id,
+        supplier_reference="v15exist001",
+        designation="Plaque de plâtre BA13 Standard NF - L.2,50 x l.1,20m x Ep.13mm",
+        supplier_unit="La pièce",
+        reference_quantity=Decimal("1"),
+        packaging_quantity=Decimal("1"),
+        correction_source="import",
+    )
+    session.add(sp)
+    session.flush()
+    old_pid = sp.product_id
+    svc = ProductMappingService(session)
+    svc.apply_exact_plaque_platre(supplier_name=supplier.name, dry_run=False)
+    session.flush()
+    session.refresh(sp)
+    assert sp.product_id == old_pid
+
+
+def test_v15_review_and_ambiguous_never_applied():
+    from app.services.product_mapping.plaque_matcher import MatchResult
+    from app.services.product_mapping.service import is_exact_applicable
+
+    class _SP:
+        product_id = None
+
+    extracted = {
+        "length_mm": 2500,
+        "width_mm": 1200,
+        "thickness_mm": 13,
+        "type": "standard",
+    }
+    review = MatchResult(
+        status=PROPOSAL_REVIEW,
+        product_id=1,
+        product_code="PMC-X",
+        score=0.55,
+        breakdown={},
+        reason="REVIEW",
+    )
+    ambiguous = MatchResult(
+        status=PROPOSAL_REVIEW,
+        product_id=1,
+        product_code="PMC-X",
+        score=0.7,
+        breakdown={},
+        reason="AMBIGUOUS",
+    )
+    assert is_exact_applicable(sp=_SP(), extraction_attrs=extracted, match=review) is False
+    assert (
+        is_exact_applicable(sp=_SP(), extraction_attrs=extracted, match=ambiguous)
+        is False
+    )
+
+
+def test_v15_unknown_identity_never_applied():
+    from app.services.product_mapping.plaque_matcher import MatchResult
+    from app.services.product_mapping.service import is_exact_applicable
+
+    class _SP:
+        product_id = None
+
+    # type UNKNOWN — même si le match prétend EXACT
+    extracted = {
+        "length_mm": 2500,
+        "width_mm": 1200,
+        "thickness_mm": 13,
+        "type": None,
+    }
+    fake_exact = MatchResult(
+        status=PROPOSAL_EXACT,
+        product_id=1,
+        product_code="PMC-BA13-STD-2500X1200",
+        score=1.0,
+        breakdown={},
+        reason="EXACT",
+    )
+    assert (
+        is_exact_applicable(sp=_SP(), extraction_attrs=extracted, match=fake_exact)
+        is False
+    )
+
+
+def test_v15_idempotent_second_pass(session):
+    from app.models.product_mapping import CORRECTION_SOURCE_EXACT_RULE
+    from scripts.normalized_catalog import seed_normalized_catalog
+
+    seed_normalized_catalog(session)
+    supplier = resolve_brico_supplier(session)
+    sp = SupplierProduct(
+        product_id=None,
+        supplier_id=supplier.id,
+        supplier_reference="v15idem001",
+        designation="Plaque de plâtre BA13 Standard NF - L.2,50 x l.1,20m x Ep.13mm",
+        supplier_unit="La pièce",
+        reference_quantity=Decimal("1"),
+        packaging_quantity=Decimal("1"),
+        correction_source="import",
+    )
+    session.add(sp)
+    session.flush()
+    svc = ProductMappingService(session)
+    first = svc.apply_exact_plaque_platre(supplier_name=supplier.name, dry_run=False)
+    session.flush()
+    session.refresh(sp)
+    assert first.applied >= 1
+    assert sp.correction_source == CORRECTION_SOURCE_EXACT_RULE
+    mapped_pid = sp.product_id
+    second = svc.apply_exact_plaque_platre(supplier_name=supplier.name, dry_run=False)
+    session.flush()
+    session.refresh(sp)
+    assert second.applied == 0
+    assert second.already_mapped >= 1
+    assert sp.product_id == mapped_pid
+    assert sp.correction_source == CORRECTION_SOURCE_EXACT_RULE
+
+
+def test_v15_rollback_on_error(session):
+    from scripts.normalized_catalog import seed_normalized_catalog
+
+    seed_normalized_catalog(session)
+    supplier = resolve_brico_supplier(session)
+    sp = SupplierProduct(
+        product_id=None,
+        supplier_id=supplier.id,
+        supplier_reference="v15roll001",
+        designation="Plaque de plâtre BA13 Standard NF - L.2,50 x l.1,20m x Ep.13mm",
+        supplier_unit="La pièce",
+        reference_quantity=Decimal("1"),
+        packaging_quantity=Decimal("1"),
+        correction_source="import",
+    )
+    session.add(sp)
+    session.flush()
+    svc = ProductMappingService(session)
+    original_flush = session.flush
+    calls = {"n": 0}
+
+    def fl(*a, **k):
+        calls["n"] += 1
+        # Échouer au flush final après écriture product_id
+        if calls["n"] >= 1 and sp.product_id is not None:
+            raise RuntimeError("simulated apply failure")
+        return original_flush(*a, **k)
+
+    session.flush = fl  # type: ignore[method-assign]
+    raised = False
+    try:
+        try:
+            svc.apply_exact_plaque_platre(supplier_name=supplier.name, dry_run=False)
+        except RuntimeError as exc:
+            raised = True
+            assert "simulated" in str(exc)
+    finally:
+        session.flush = original_flush  # type: ignore[method-assign]
+
+    assert raised
+    session.expire(sp)
+    session.refresh(sp)
+    assert sp.product_id is None
+    assert sp.correction_source == "import"

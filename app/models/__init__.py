@@ -117,7 +117,8 @@ class SupplierProduct(Timestamps, Base):
     introduced_by_catalog_id: Mapped[int | None] = mapped_column(
         Integer, nullable=True, default=None, index=True
     )
-    # None | import | manual — une correction manuelle n'est pas écrasée par réimport CSV.
+    # None | import | manual | exact_rule
+    # manual / exact_rule : mapping product_id protégé contre réimport.
     correction_source: Mapped[str | None] = mapped_column(String(20), default=None)
 
 

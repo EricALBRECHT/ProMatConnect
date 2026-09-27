@@ -186,12 +186,15 @@ def _image_url_for_store(product: BricoDepotCatalogProduct) -> str | None:
 
 
 def proposed_catalog_fields(
-    product: BricoDepotCatalogProduct, *, manual: bool
+    product: BricoDepotCatalogProduct, *, correction_source: str | None
 ) -> dict[str, Any]:
     """Champs catalogue que l'import est autorisé à écrire.
 
     correction_source=manual : pas de supplier_unit / conditionnement.
+    manual | exact_rule : ne pas réécrire correction_source → import.
     """
+    from app.models.product_mapping import CORRECTION_SOURCES_PROTECTED
+
     designation = _norm_str(product.name) or product.supplier_reference
     fields: dict[str, Any] = {
         "designation": designation[:200],
@@ -207,8 +210,9 @@ def proposed_catalog_fields(
     image = _image_url_for_store(product)
     if image is not None:
         fields["image_url"] = image
-    if not manual:
+    if correction_source != "manual":
         fields["supplier_unit"] = _supplier_unit_from_catalog(product)
+    if correction_source not in CORRECTION_SOURCES_PROTECTED:
         fields["correction_source"] = "import"
     return fields
 
@@ -228,8 +232,9 @@ def catalog_field_diff(
     sp: SupplierProduct, product: BricoDepotCatalogProduct
 ) -> dict[str, tuple[Any, Any]]:
     """Diff des champs importables (old, new). Vide = unchanged."""
-    manual = sp.correction_source == "manual"
-    proposed = proposed_catalog_fields(product, manual=manual)
+    proposed = proposed_catalog_fields(
+        product, correction_source=sp.correction_source
+    )
     current = current_catalog_fields(sp, list(proposed.keys()))
     diff: dict[str, tuple[Any, Any]] = {}
     for key, new_val in proposed.items():
@@ -318,8 +323,9 @@ def upsert_supplier_product(
         return "skipped", mapping_preserved
 
     # updated
-    manual = sp.correction_source == "manual"
-    proposed = proposed_catalog_fields(product, manual=manual)
+    proposed = proposed_catalog_fields(
+        product, correction_source=sp.correction_source
+    )
     for key, value in proposed.items():
         setattr(sp, key, value)
     if catalog_id is not None and sp.introduced_by_catalog_id is None:
