@@ -35,6 +35,7 @@ from app.services.supplier_live_cache import (
     CachedLiveOffer,
     SupplierLiveCacheService,
 )
+from app.services.conditioning import resolve_reference_quantity
 from app.services.tax import validate_vat_rate
 from app.services.units import units_compatible
 
@@ -455,6 +456,7 @@ class BricoDepotConnector(SupplierConnector):
         )
         qty = cached.stock_quantity
         stock = int(qty) if usable and qty is not None and qty > 0 else 0
+        ref_qty = resolve_reference_quantity(sp)
         pack_qty = sp.packaging_quantity if sp.packaging_quantity is not None else Decimal("1")
         return ConnectorOffer(
             supplier=self._supplier_name,
@@ -462,7 +464,7 @@ class BricoDepotConnector(SupplierConnector):
             product_id=int(sp.product_id),
             supplier_reference=sp.supplier_reference,
             supplier_unit=sp.supplier_unit,
-            reference_quantity=sp.reference_quantity,
+            reference_quantity=ref_qty,
             reference_unit=sp.reference_unit or product.reference_unit,
             packaging_quantity=pack_qty,
             price=ht,
@@ -496,6 +498,7 @@ class BricoDepotConnector(SupplierConnector):
         )
         qty = product_offer.stock_quantity
         stock = int(qty) if usable and qty is not None and qty > 0 else 0
+        ref_qty = resolve_reference_quantity(sp)
         pack_qty = sp.packaging_quantity if sp.packaging_quantity is not None else Decimal("1")
         return ConnectorOffer(
             supplier=self._supplier_name,
@@ -503,7 +506,7 @@ class BricoDepotConnector(SupplierConnector):
             product_id=int(sp.product_id),
             supplier_reference=sp.supplier_reference,
             supplier_unit=sp.supplier_unit,
-            reference_quantity=sp.reference_quantity,
+            reference_quantity=ref_qty,
             reference_unit=sp.reference_unit or product.reference_unit,
             packaging_quantity=pack_qty,
             price=price,

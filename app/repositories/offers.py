@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.connectors.base import AgencyData, ConnectorOffer
 from app.models import Agency, Offer, Product, Supplier, SupplierImport, SupplierProduct
+from app.services.conditioning import resolve_reference_quantity
 from app.services.units import units_compatible
 
 
@@ -63,7 +64,7 @@ class OfferRepository:
                     product_id=int(product_sp.product_id),
                     supplier_reference=product_sp.supplier_reference,
                     supplier_unit=product_sp.supplier_unit,
-                    reference_quantity=product_sp.reference_quantity,
+                    reference_quantity=resolve_reference_quantity(product_sp),
                     reference_unit=product_sp.reference_unit or product.reference_unit,
                     packaging_quantity=pack_qty,
                     price=offer.price,

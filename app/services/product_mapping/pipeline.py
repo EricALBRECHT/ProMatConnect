@@ -524,6 +524,9 @@ def apply_exact_for_rule(
                 continue
             sp.product_id = match.product_id
             sp.correction_source = CORRECTION_SOURCE_EXACT_RULE
+            from app.services.conditioning import resolve_reference_quantity
+
+            sp.reference_quantity = resolve_reference_quantity(sp)
             out.applied += 1
 
         if not dry_run:
