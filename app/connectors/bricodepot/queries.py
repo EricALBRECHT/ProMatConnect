@@ -32,3 +32,7 @@ def load_product_query() -> str:
 
 def load_stores_query() -> str:
     return load_query("stores.graphql")
+
+
+def load_catalog_query() -> str:
+    return load_query("catalog.graphql")

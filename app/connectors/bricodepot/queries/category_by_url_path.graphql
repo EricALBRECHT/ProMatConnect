@@ -1,0 +1,11 @@
+# Lookup famille absente de categoryList(8089), ex. cuisine.
+query CategoryByUrlPath($urlPath: String!) {
+  categories(filters: { url_path: { eq: $urlPath } }, pageSize: 5, currentPage: 1) {
+    items {
+      uid
+      name
+      url_path
+      product_count
+    }
+  }
+}

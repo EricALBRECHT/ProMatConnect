@@ -1,0 +1,14 @@
+# Enfants de la catégorie racine « Produits » (id Magento 8089).
+query CategoryFamilies($id: String!) {
+  categoryList(filters: { ids: { eq: $id } }) {
+    uid
+    name
+    url_path
+    children {
+      uid
+      name
+      url_path
+      product_count
+    }
+  }
+}

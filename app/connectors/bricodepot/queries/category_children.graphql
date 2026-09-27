@@ -1,0 +1,9 @@
+# Sous-catégories directes (Magento categoryList par id numérique).
+query CategoryChildren($id: String!) {
+  categoryList(filters: { ids: { eq: $id } }) {
+    children {
+      uid
+      product_count
+    }
+  }
+}

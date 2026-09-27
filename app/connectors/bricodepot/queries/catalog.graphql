@@ -1,0 +1,31 @@
+# Enrichissement catalogue (SKU connus) — distinct de product.graphql (prix/stock live).
+# Pas de conversion conditionnement. Champs absents tolérés côté parseur.
+
+query CatalogBySku(
+  $filter: ProductAttributeFilterInput
+  $currentPage: Int
+  $pageSize: Int
+) {
+  products(filter: $filter, currentPage: $currentPage, pageSize: $pageSize) {
+    items {
+      uid
+      id
+      name
+      sku
+      ean_code
+      sap_easier_code
+      conditionnement_label
+      content_net_value
+      content_net_unit_label
+      images {
+        role
+        url
+      }
+      categories {
+        name
+        uid
+        url_path
+      }
+    }
+  }
+}
