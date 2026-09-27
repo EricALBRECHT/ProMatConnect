@@ -2,14 +2,13 @@
 
 Sous-familles : RAIL | MONTANT | FOURRURE.
 Jamais de valeur inventée — absence → null (UNKNOWN).
+Longueur nominale : table explicite portée par la CategoryRule.
 """
 
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from app.models.product_mapping import (
@@ -19,6 +18,27 @@ from app.models.product_mapping import (
     KIND_MONTANT,
     KIND_RAIL,
 )
+from app.services.product_mapping.primitives.length import extract_bar_length_mm
+from app.services.product_mapping.primitives.profile import extract_metal_profile
+from app.services.product_mapping.primitives.textutil import fold as _fold
+from app.services.product_mapping.rules.base import apply_normalization_specs
+from app.services.product_mapping.rules.ossature_placo import (
+    IDENTITY_KEYS,
+    NOMINAL_LENGTH_MAP,
+    NOMINAL_LENGTH_SPEC,
+)
+
+__all__ = [
+    "ExtractionResult",
+    "NOMINAL_LENGTH_MAP",
+    "classify_kind",
+    "extract_length_mm",
+    "extract_ossature_placo",
+    "extract_profile",
+    "identity_attrs_sufficient",
+    "is_accessory_or_noise",
+    "nominal_length_mm",
+]
 
 REASON_NOT_THIS_CATEGORY = "NOT_THIS_CATEGORY"
 REASON_NO_PMC_PRODUCT = "NO_PMC_PRODUCT"
@@ -69,82 +89,9 @@ _MONTANTE_SHOE_RE = re.compile(
 )
 _MONTANTES_WORD_RE = re.compile(r"\bmontantes?\b", re.I)
 
-_PROFILE_RE = re.compile(
-    r"\b(?P<p>"
-    r"R\s*48|R\s*70|R\s*90|R\s*100|"
-    r"M\s*48|M\s*70|M\s*90|"
-    r"F\s*45|"
-    r"M48\d{2}"  # ex. M4835 → M48
-    r")\b",
-    re.I,
-)
-_RAIL_DE_N_RE = re.compile(r"\brail\s+de\s+(?P<n>48|70|90|100)\b", re.I)
-_MONTANT_N_RE = re.compile(r"\bmontant\s+(?P<n>48|70|90)\b", re.I)
-_FOURRURE_N_RE = re.compile(r"\bfourrure\s+(?:profilee\s+)?(?:galvanisee?\s+)?(?P<n>45)\b", re.I)
-
 _KIND_RAIL_RE = re.compile(r"\brails?\b", re.I)
 _KIND_MONTANT_RE = re.compile(r"\bmontants?\b", re.I)
 _KIND_FOURRURE_RE = re.compile(r"\bfourrures?\b", re.I)
-
-_LENGTH_PATTERNS = (
-    # 48 x 2490 mm (souvent après profil)
-    re.compile(
-        r"\b\d{2}\s*[x×]\s*(?P<l>\d{3,5})\s*mm\b",
-        re.I,
-    ),
-    # L. 3 m / L.2,50m / longueur 3 m
-    re.compile(
-        r"(?:l\.?|longueur)\s*(?P<l>\d+(?:[.,]\d+)?)\s*(?P<u>mm|cm|m|ml)\b",
-        re.I,
-    ),
-    # 3ML / 2,50ML / 5,3 m / 3000 mm
-    re.compile(
-        r"(?<![A-Za-z0-9])(?P<l>\d+(?:[.,]\d+)?)\s*(?P<u>mm|cm|m|ml)\b",
-        re.I,
-    ),
-    # « - 3 m NF » / « - 2,50 m »
-    re.compile(
-        r"[-–]\s*(?P<l>\d+(?:[.,]\d+)?)\s*(?P<u>m|ml|cm|mm)\b",
-        re.I,
-    ),
-)
-
-
-def _fold(text: str) -> str:
-    nfkd = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
-
-
-def _parse_number(raw: str) -> Decimal | None:
-    try:
-        return Decimal(raw.strip().replace(" ", "").replace(",", "."))
-    except (InvalidOperation, ValueError):
-        return None
-
-
-def _to_mm(value: Decimal, unit: str) -> int | None:
-    u = unit.lower().replace(" ", "")
-    if u in {"m", "ml"}:
-        mm = value * 1000
-    elif u == "cm":
-        mm = value * 10
-    elif u == "mm":
-        mm = value
-    else:
-        return None
-    mm_i = int(mm.to_integral_value(rounding=ROUND_HALF_UP))
-    if mm_i < 500 or mm_i > 12000:
-        return None
-    return mm_i
-
-
-def _norm_profile(raw: str) -> str | None:
-    t = re.sub(r"\s+", "", raw.upper())
-    if t.startswith("M48") and len(t) > 3 and t[3:].isdigit():
-        return "M48"
-    if t in {"R48", "R70", "R90", "R100", "M48", "M70", "M90", "F45"}:
-        return t
-    return None
 
 
 @dataclass(frozen=True)
@@ -172,38 +119,12 @@ def is_accessory_or_noise(designation: str) -> bool:
 
 
 def extract_profile(text: str) -> str | None:
-    m = _PROFILE_RE.search(text)
-    if m:
-        return _norm_profile(m.group("p"))
-    m = _RAIL_DE_N_RE.search(text)
-    if m:
-        return f"R{m.group('n')}"
-    m = _MONTANT_N_RE.search(_fold(text))
-    if m:
-        return f"M{m.group('n')}"
-    m = _FOURRURE_N_RE.search(_fold(text))
-    if m:
-        return "F45"
-    return None
+    return extract_metal_profile(text)
 
 
 def extract_length_mm(text: str) -> int | None:
     """Longueur barre — première valeur plausible (500–12000 mm)."""
-    for pattern in _LENGTH_PATTERNS:
-        for m in pattern.finditer(text.replace("×", "x")):
-            n = _parse_number(m.group("l"))
-            if n is None:
-                continue
-            unit = m.groupdict().get("u") or "mm"
-            # Pattern « 48 x 2490 mm » : groupe l est déjà en mm
-            if "u" not in m.groupdict() or m.groupdict().get("u") is None:
-                if 500 <= int(n) <= 12000:
-                    return int(n)
-                continue
-            mm = _to_mm(n, unit)
-            if mm is not None:
-                return mm
-    return None
+    return extract_bar_length_mm(text)
 
 
 def classify_kind(designation: str, profile: str | None) -> str | None:
@@ -237,16 +158,6 @@ def classify_kind(designation: str, profile: str | None) -> str | None:
         # sans profil ni indice placo → rejeter
         return None
     return None
-
-
-# Longueurs commerciales nominales — table explicite (PAS une tolérance ±)
-# length_mm fournisseur → nominal_length_mm pour matching PMC
-NOMINAL_LENGTH_MAP: dict[int, int] = {
-    2490: 2500,
-    2500: 2500,
-    2990: 3000,
-    3000: 3000,
-}
 
 
 def nominal_length_mm(length_mm: int | None) -> int | None:
@@ -284,8 +195,9 @@ def extract_ossature_placo(*, designation: str) -> ExtractionResult:
         "kind": kind,
         "profile": profile,
         "length_mm": length,  # réel fournisseur — jamais modifié
-        "nominal_length_mm": nominal_length_mm(length),
     }
+    # Longueur nominale posée par la normalisation déclarative de la règle
+    apply_normalization_specs(attrs, (NOMINAL_LENGTH_SPEC,))
     conf = 0.4
     if profile:
         conf += 0.3
@@ -303,6 +215,4 @@ def extract_ossature_placo(*, designation: str) -> ExtractionResult:
 
 def identity_attrs_sufficient(attrs: dict[str, Any]) -> bool:
     """Identité matching : kind + profile + nominal_length_mm."""
-    return all(
-        attrs.get(k) is not None for k in ("kind", "profile", "nominal_length_mm")
-    )
+    return all(attrs.get(k) is not None for k in IDENTITY_KEYS)

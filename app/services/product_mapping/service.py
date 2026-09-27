@@ -1,4 +1,9 @@
-"""Service mapping produit V1.1 — PLAQUE_PLATRE.
+"""Service mapping produit V2 — adaptateurs de rapport au-dessus du pipeline.
+
+Toute la mécanique (sélection, extraction, matching, garde-fous) vit dans
+pipeline.py + generic_matcher.py, pilotée par les CategoryRule. Ce module ne
+fait plus que projeter le résultat générique dans les structures de rapport
+attendues par le CLI.
 
 Dry-run / analyse : ne touche JAMAIS SupplierProduct.product_id.
 Les mappings manuels (product_id déjà posé) → ALREADY_MAPPED, non recalculés.
@@ -9,119 +14,68 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Product, Supplier, SupplierProduct
 from app.models.product_mapping import (
-    ALGORITHM_VERSION_PLAQUE_V1,
-    CATEGORY_OSSATURE_PLACO,
-    CATEGORY_PLAQUE_PLATRE,
-    CORRECTION_SOURCE_EXACT_RULE,
-    EXTRACTOR_VERSION_OSSATURE_V1,
-    EXTRACTOR_VERSION_PLAQUE_V1,
     KIND_FOURRURE,
     KIND_MONTANT,
     KIND_RAIL,
-    PROPOSAL_EXACT,
-    PROPOSAL_HIGH,
-    PROPOSAL_REVIEW,
     PROPOSAL_UNMAPPED,
-    ProductAttributeDef,
     ProductCategory,
-    ProductMappingProposal,
-    SupplierProductFeature,
 )
-from app.services.product_mapping.plaque_extractor import (
+from app.services.product_mapping import pipeline
+from app.services.product_mapping.generic_matcher import (
     REASON_ALREADY_MAPPED,
     REASON_AMBIGUOUS,
     REASON_EXACT,
-    REASON_HIGH,
     REASON_INSUFFICIENT_DATA,
     REASON_NO_PMC_PRODUCT,
     REASON_NOT_THIS_CATEGORY,
     REASON_REVIEW,
+    MatchResult,
+    best_match,
+)
+from app.services.product_mapping.pipeline import (
+    OUTCOME_ALREADY_MAPPED,
+    OUTCOME_NOT_THIS_CATEGORY,
+    ApplyExactResult,
+    CategoryRunResult,
+    ExactApplication,
+    resolve_supplier_ids,
+)
+from app.services.product_mapping.plaque_extractor import (
     diagnose_attribute_gaps,
     extract_plaque_platre,
-    identity_attrs_sufficient,
 )
-from app.services.product_mapping.plaque_matcher import MatchResult, best_match
-from app.services.product_mapping import ossature_extractor as ox
-from app.services.product_mapping import ossature_matcher as om
+from app.services.product_mapping.rules.ossature_placo import (
+    OSSATURE_ATTR_DEFS,
+    OSSATURE_PLACO_RULE,
+)
+from app.services.product_mapping.rules.plaque_platre import (
+    PLAQUE_ATTR_DEFS,
+    PLAQUE_PLATRE_RULE,
+)
 
-
-PLAQUE_ATTR_DEFS: list[dict[str, Any]] = [
-    {
-        "key": "type",
-        "data_type": "enum",
-        "required": True,
-        "match_role": "identity",
-        "enum_values": [
-            "standard",
-            "hydrofuge",
-            "multifonctions",
-            "legere",
-            "feu",
-            "phonique",
-        ],
-    },
-    {
-        "key": "length_mm",
-        "data_type": "int",
-        "required": True,
-        "unit": "mm",
-        "match_role": "identity",
-    },
-    {
-        "key": "width_mm",
-        "data_type": "int",
-        "required": True,
-        "unit": "mm",
-        "match_role": "identity",
-    },
-    {
-        "key": "thickness_mm",
-        "data_type": "int",
-        "required": True,
-        "unit": "mm",
-        "match_role": "identity",
-    },
-    {
-        "key": "hydrofuge",
-        "data_type": "bool",
-        "required": False,
-        "match_role": "optional",
-    },
-    {
-        "key": "fire_resistant",
-        "data_type": "bool",
-        "required": False,
-        "match_role": "optional",
-    },
-    {
-        "key": "acoustic",
-        "data_type": "bool",
-        "required": False,
-        "match_role": "optional",
-    },
+__all__ = [
+    "ApplyExactResult",
+    "ExactApplication",
+    "MappingExample",
+    "MappingRunResult",
+    "OSSATURE_ATTR_DEFS",
+    "OssatureRunResult",
+    "PLAQUE_ATTR_DEFS",
+    "ProductMappingService",
+    "ensure_ossature_placo_category",
+    "ensure_plaque_platre_category",
+    "is_exact_applicable",
+    "load_ossature_pmc_candidates",
+    "load_plaque_pmc_candidates",
+    "resolve_supplier_ids",
+    "sql_ossature_candidates",
+    "sql_plaque_candidates",
 ]
-
-# Pré-sélection SQL raisonnable (évite de scanner les 27k en Python)
-_SQL_CANDIDATE_FILTERS = (
-    SupplierProduct.designation.ilike("%plaque%"),
-    SupplierProduct.designation.ilike("%BA13%"),
-    SupplierProduct.designation.ilike("%BA18%"),
-    SupplierProduct.designation.ilike("%BA10%"),
-    SupplierProduct.designation.ilike("%BA15%"),
-    SupplierProduct.designation.ilike("%BA25%"),
-    SupplierProduct.designation.ilike("%plâtre%"),
-    SupplierProduct.designation.ilike("%platre%"),
-    SupplierProduct.designation.ilike("%Purelight%"),
-    SupplierProduct.designation.ilike("%placo%"),
-)
 
 
 @dataclass
@@ -136,79 +90,24 @@ class MappingExample:
     existing_product_id: int | None
 
 
-@dataclass
-class ExactApplication:
-    """Proposition EXACT applicable (product_id encore NULL)."""
-
-    supplier_product_id: int
-    supplier_reference: str
-    designation: str
-    product_id: int
-    product_code: str
-    extracted: dict[str, Any]
-
-
-@dataclass
-class ApplyExactResult:
-    analysed: int = 0
-    already_mapped: int = 0
-    exact_candidates: int = 0
-    applied: int = 0
-    skipped: int = 0
-    errors: int = 0
-    dry_run: bool = True
-    applications: list[ExactApplication] = field(default_factory=list)
-    error_messages: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict:
-        return {
-            "analysed": self.analysed,
-            "already_mapped": self.already_mapped,
-            "exact_candidates": self.exact_candidates,
-            "applied": self.applied,
-            "skipped": self.skipped,
-            "errors": self.errors,
-            "dry_run": self.dry_run,
-            "applications": [
-                {
-                    "supplier_product_id": a.supplier_product_id,
-                    "supplier_reference": a.supplier_reference,
-                    "designation": a.designation,
-                    "product_id": a.product_id,
-                    "product_code": a.product_code,
-                    "extracted": a.extracted,
-                }
-                for a in self.applications
-            ],
-            "error_messages": self.error_messages,
-        }
-
-
 def is_exact_applicable(
     *,
-    sp: SupplierProduct,
+    sp: Any,
     extraction_attrs: dict[str, Any],
     match: MatchResult,
 ) -> bool:
-    """True si le mapping EXACT peut être appliqué sans ambiguïté ni UNKNOWN critique."""
-    if sp.product_id is not None:
-        return False
-    if match.reason != REASON_EXACT or match.status != PROPOSAL_EXACT:
-        return False
-    if match.product_id is None or not match.product_code:
-        return False
-    # Identity complète — pas d'EXACT construit sur UNKNOWN
-    if not identity_attrs_sufficient(extraction_attrs):
-        return False
-    for key in ("length_mm", "width_mm", "thickness_mm", "type"):
-        if extraction_attrs.get(key) is None:
-            return False
-    return True
+    """True si le mapping EXACT PLAQUE peut être appliqué sans UNKNOWN critique."""
+    return pipeline.is_exact_applicable(
+        PLAQUE_PLATRE_RULE,
+        sp=sp,
+        extraction_attrs=extraction_attrs,
+        match=match,
+    )
 
 
 @dataclass
 class MappingRunResult:
-    """Résultat d'analyse V1.1 — compteurs + variantes + manques PMC."""
+    """Résultat d'analyse PLAQUE — compteurs + variantes + manques PMC."""
 
     supplier_product_total: int = 0
     initial_candidates: int = 0
@@ -316,17 +215,110 @@ class MappingRunResult:
         }
 
 
+@dataclass
+class OssatureRunResult:
+    supplier_product_total: int = 0
+    initial_candidates: int = 0
+    not_this_category: int = 0
+    true_elements: int = 0
+    rails: int = 0
+    montants: int = 0
+    fourrures: int = 0
+    already_mapped: int = 0
+    exact: int = 0
+    review: int = 0
+    no_pmc_product: int = 0
+    insufficient_data: int = 0
+    ambiguous: int = 0
+    analysed: int = 0
+    missing_pmc_by_variant: dict[str, int] = field(default_factory=dict)
+    near_length_cases: list[dict[str, Any]] = field(default_factory=list)
+    insufficient_cases: list[dict[str, Any]] = field(default_factory=list)
+    examples: list[MappingExample] = field(default_factory=list)
+    false_positive_samples: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "supplier_product_total": self.supplier_product_total,
+            "initial_candidates": self.initial_candidates,
+            "not_this_category": self.not_this_category,
+            "true_elements": self.true_elements,
+            "rails": self.rails,
+            "montants": self.montants,
+            "fourrures": self.fourrures,
+            "already_mapped": self.already_mapped,
+            "exact": self.exact,
+            "review": self.review,
+            "no_pmc_product": self.no_pmc_product,
+            "insufficient_data": self.insufficient_data,
+            "ambiguous": self.ambiguous,
+            "analysed": self.analysed,
+            "missing_pmc_by_variant": self.missing_pmc_by_variant,
+            "near_length_cases": self.near_length_cases,
+            "insufficient_cases": self.insufficient_cases,
+            "false_positive_samples": self.false_positive_samples,
+            "examples": [
+                {
+                    "supplier_reference": e.supplier_reference,
+                    "designation": e.designation,
+                    "extracted": e.extracted,
+                    "candidate": e.candidate_code,
+                    "status": e.status,
+                    "reason": e.reason,
+                    "score": e.score,
+                    "existing_product_id": e.existing_product_id,
+                }
+                for e in self.examples
+            ],
+        }
+
+
+# --------------------------------------------------------------------------
+# Façades catégorie (compat CLI / tests)
+# --------------------------------------------------------------------------
+
+def ensure_plaque_platre_category(session: Session) -> ProductCategory:
+    return pipeline.ensure_category(session, PLAQUE_PLATRE_RULE)
+
+
+def ensure_ossature_placo_category(session: Session) -> ProductCategory:
+    return pipeline.ensure_category(session, OSSATURE_PLACO_RULE)
+
+
+def load_plaque_pmc_candidates(session: Session) -> list[tuple[int, str, dict | None]]:
+    return [
+        (pid, code, attrs)
+        for pid, code, attrs, _sub in pipeline.load_pmc_candidates(
+            session, PLAQUE_PLATRE_RULE
+        )
+    ]
+
+
+def load_ossature_pmc_candidates(
+    session: Session,
+) -> list[tuple[int, str, dict | None, str | None]]:
+    return pipeline.load_pmc_candidates(session, OSSATURE_PLACO_RULE)
+
+
+def sql_plaque_candidates(session: Session, supplier_ids: list[int], *, limit=None):
+    return pipeline.sql_supplier_candidates(
+        session, PLAQUE_PLATRE_RULE, supplier_ids, limit=limit
+    )
+
+
+def sql_ossature_candidates(session: Session, supplier_ids: list[int], *, limit=None):
+    return pipeline.sql_supplier_candidates(
+        session, OSSATURE_PLACO_RULE, supplier_ids, limit=limit
+    )
+
+
+# --------------------------------------------------------------------------
+# Libellés de variantes
+# --------------------------------------------------------------------------
+
 def _variant_label(attrs: dict[str, Any]) -> str:
     t = attrs.get("type") or "?"
-    L = attrs.get("length_mm")
-    W = attrs.get("width_mm")
-    Th = attrs.get("thickness_mm")
-    dims = (
-        f"{L}×{W}×{Th}"
-        if L is not None and W is not None and Th is not None
-        else "dims?"
-    )
-    return f"{t} {dims}"
+    return f"{t} {_dims_label(attrs)}"
 
 
 def _dims_label(attrs: dict[str, Any]) -> str:
@@ -338,86 +330,38 @@ def _dims_label(attrs: dict[str, Any]) -> str:
     return f"{L}×{W}×{Th}"
 
 
-def ensure_plaque_platre_category(session: Session) -> ProductCategory:
-    cat = session.scalar(
-        select(ProductCategory).where(ProductCategory.code == CATEGORY_PLAQUE_PLATRE)
+def _ossature_variant_label(attrs: dict[str, Any]) -> str:
+    # Regroupement NO_PMC sur longueur nominale (identité matching)
+    ln = attrs.get("nominal_length_mm")
+    if ln is None:
+        ln = attrs.get("length_mm")
+    return (
+        f"{attrs.get('kind') or '?'} "
+        f"{attrs.get('profile') or '?'} "
+        f"{ln if ln is not None else '?'}"
     )
-    if cat is None:
-        cat = ProductCategory(
-            code=CATEGORY_PLAQUE_PLATRE,
-            name="Plaques de plâtre",
-            parent_id=None,
-            reference_unit_default="pièce",
-            schema_version="1",
-        )
-        session.add(cat)
-        session.flush()
-
-    existing_keys = {
-        d.key
-        for d in session.scalars(
-            select(ProductAttributeDef).where(ProductAttributeDef.category_id == cat.id)
-        ).all()
-    }
-    for spec in PLAQUE_ATTR_DEFS:
-        if spec["key"] in existing_keys:
-            continue
-        session.add(
-            ProductAttributeDef(
-                category_id=cat.id,
-                key=spec["key"],
-                data_type=spec["data_type"],
-                required=bool(spec.get("required")),
-                unit=spec.get("unit"),
-                enum_values=spec.get("enum_values"),
-                match_role=spec.get("match_role", "optional"),
-            )
-        )
-    session.flush()
-    return cat
 
 
-def load_plaque_pmc_candidates(session: Session) -> list[tuple[int, str, dict | None]]:
-    rows = session.scalars(
-        select(Product).where(
-            or_(
-                Product.code.like("PMC-BA%"),
-                Product.subcategory == "Plaques de plâtre",
-            ),
-            Product.is_active.is_(True),
-        )
-    ).all()
-    return [(p.id, p.code, p.attributes) for p in rows]
-
-
-def resolve_supplier_ids(session: Session, supplier_name: str) -> list[int]:
-    names = {supplier_name, "BRICO_DEPOT", "BRICO DEPOT", "Brico Dépôt"}
-    suppliers = session.scalars(select(Supplier).where(Supplier.name.in_(names))).all()
-    return [s.id for s in suppliers]
-
-
-def sql_plaque_candidates(
-    session: Session,
-    supplier_ids: list[int],
-    *,
-    limit: int | None = None,
-) -> list[SupplierProduct]:
-    q = (
-        select(SupplierProduct)
-        .where(
-            SupplierProduct.supplier_id.in_(supplier_ids),
-            or_(*_SQL_CANDIDATE_FILTERS),
-        )
-        .order_by(SupplierProduct.id)
+def _example(item, *, status: str, reason: str, score: float | None) -> MappingExample:
+    return MappingExample(
+        supplier_reference=item.sp.supplier_reference,
+        designation=(item.sp.designation or "")[:160],
+        extracted=item.attrs,
+        candidate_code=item.match.product_code if item.match else None,
+        status=status,
+        reason=reason,
+        score=score,
+        existing_product_id=item.sp.product_id,
     )
-    if limit is not None:
-        q = q.limit(limit)
-    return list(session.scalars(q).all())
 
 
 class ProductMappingService:
     def __init__(self, session: Session):
         self.session = session
+
+    # ------------------------------------------------------------------
+    # PLAQUE_PLATRE
+    # ------------------------------------------------------------------
 
     def run_plaque_platre(
         self,
@@ -429,29 +373,38 @@ class ProductMappingService:
         persist: bool = False,
         example_limit: int = 10,
     ) -> MappingRunResult:
-        ensure_plaque_platre_category(self.session)
-        candidates = load_plaque_pmc_candidates(self.session)
+        run = pipeline.run_category(
+            self.session,
+            PLAQUE_PLATRE_RULE,
+            supplier_name=supplier_name,
+            limit=limit,
+            all_candidates=all_candidates,
+            example_limit=example_limit,
+            persist=persist,
+            dry_run=dry_run,
+        )
+        return self._plaque_report(run, example_limit=example_limit)
+
+    def _plaque_report(
+        self, run: CategoryRunResult, *, example_limit: int
+    ) -> MappingRunResult:
         result = MappingRunResult()
-
-        supplier_ids = resolve_supplier_ids(self.session, supplier_name)
-        if not supplier_ids:
-            return result
-
-        result.supplier_product_total = int(
-            self.session.scalar(
-                select(func.count())
-                .select_from(SupplierProduct)
-                .where(SupplierProduct.supplier_id.in_(supplier_ids))
-            )
-            or 0
-        )
-
-        # --all : toute la pré-sélection SQL ; sinon plafond large pour atteindre --limit classifiés
-        fetch_limit = None if all_candidates else max((limit or 50) * 20, 200)
-        sps = sql_plaque_candidates(
-            self.session, supplier_ids, limit=fetch_limit
-        )
-        result.initial_candidates = len(sps)
+        result.supplier_product_total = run.supplier_product_total
+        result.initial_candidates = run.initial_candidates
+        result.analysed = run.analysed
+        result.not_this_category = run.not_this_category
+        result.true_plaques = run.classified
+        result.classified = run.classified
+        result.already_mapped = run.already_mapped
+        result.exact = run.exact
+        result.high = run.high
+        result.review = run.review
+        result.ambiguous = run.ambiguous
+        result.no_pmc_product = run.no_pmc_product
+        result.insufficient_data = run.insufficient_data
+        result.unmapped = run.unmapped
+        result.persisted_features = run.persisted_features
+        result.persisted_proposals = run.persisted_proposals
 
         type_c: Counter[str] = Counter()
         thick_c: Counter[str] = Counter()
@@ -461,8 +414,6 @@ class ProductMappingService:
         variant_c: Counter[str] = Counter()
         other_type_c: Counter[str] = Counter()
         missing_c: Counter[str] = Counter()
-
-        snapshot_product_ids = {sp.id: sp.product_id for sp in sps}
         known_types = {
             "standard",
             "hydrofuge",
@@ -472,37 +423,25 @@ class ProductMappingService:
             "phonique",
         }
 
-        for sp in sps:
-            if not all_candidates and limit is not None and result.true_plaques >= limit:
-                break
-
-            extraction = extract_plaque_platre(designation=sp.designation or "")
-            result.analysed += 1
-
-            if not extraction.classified:
-                result.not_this_category += 1
+        for item in run.items:
+            sp = item.sp
+            if item.outcome == OUTCOME_NOT_THIS_CATEGORY:
                 if (
-                    extraction.reason == REASON_NOT_THIS_CATEGORY
+                    item.reason == REASON_NOT_THIS_CATEGORY
                     and len(result.examples) < example_limit
                     and self._interesting_not_category(sp.designation or "")
                 ):
                     result.examples.append(
-                        MappingExample(
-                            supplier_reference=sp.supplier_reference,
-                            designation=(sp.designation or "")[:160],
-                            extracted={},
-                            candidate_code=None,
+                        _example(
+                            item,
                             status=PROPOSAL_UNMAPPED.upper(),
                             reason=REASON_NOT_THIS_CATEGORY,
                             score=None,
-                            existing_product_id=sp.product_id,
                         )
                     )
                 continue
 
-            result.classified += 1
-            result.true_plaques += 1
-            attrs = extraction.attributes
+            attrs = item.attrs
             self._accumulate_variant_stats(
                 attrs,
                 type_c,
@@ -516,88 +455,46 @@ class ProductMappingService:
                 result,
             )
 
-            # Mapping déjà posé (manuel ou historique) — intouchable
-            if sp.product_id is not None:
-                result.already_mapped += 1
+            if item.outcome == OUTCOME_ALREADY_MAPPED:
+                # Pas de proposal qui recalculerait — mapping préservé
                 if len(result.examples) < example_limit:
                     result.examples.append(
-                        MappingExample(
-                            supplier_reference=sp.supplier_reference,
-                            designation=(sp.designation or "")[:160],
-                            extracted=attrs,
-                            candidate_code=None,
+                        _example(
+                            item,
                             status="ALREADY_MAPPED",
                             reason=REASON_ALREADY_MAPPED,
                             score=None,
-                            existing_product_id=sp.product_id,
                         )
                     )
-                # Pas de persist proposal qui recalculerait — mapping préservé
                 continue
 
-            match = best_match(attrs, candidates)
-            reason = match.reason or ""
-            if not reason:
-                if match.status == PROPOSAL_EXACT:
-                    reason = REASON_EXACT
-                elif match.status == PROPOSAL_HIGH:
-                    reason = REASON_HIGH
-                elif match.status == PROPOSAL_REVIEW:
-                    reason = REASON_REVIEW
-                else:
-                    reason = REASON_NO_PMC_PRODUCT
-
-            if reason == REASON_EXACT:
-                result.exact += 1
-                if is_exact_applicable(sp=sp, extraction_attrs=attrs, match=match):
-                    result.exact_applications.append(
-                        ExactApplication(
-                            supplier_product_id=sp.id,
-                            supplier_reference=sp.supplier_reference,
-                            designation=(sp.designation or "")[:200],
-                            product_id=match.product_id,  # type: ignore[arg-type]
-                            product_code=match.product_code or "",
-                            extracted=dict(attrs),
-                        )
+            match = item.match
+            assert match is not None
+            if item.reason == REASON_EXACT and is_exact_applicable(
+                sp=sp, extraction_attrs=attrs, match=match
+            ):
+                result.exact_applications.append(
+                    ExactApplication(
+                        supplier_product_id=sp.id,
+                        supplier_reference=sp.supplier_reference,
+                        designation=(sp.designation or "")[:200],
+                        product_id=match.product_id,  # type: ignore[arg-type]
+                        product_code=match.product_code or "",
+                        extracted=dict(attrs),
                     )
-            elif reason == REASON_HIGH:
-                result.high += 1
-            elif reason == REASON_AMBIGUOUS:
-                result.ambiguous += 1
-            elif reason == REASON_REVIEW:
-                result.review += 1
-            elif reason == REASON_INSUFFICIENT_DATA:
-                result.insufficient_data += 1
-                result.unmapped += 1
-            elif reason == REASON_NO_PMC_PRODUCT:
-                result.no_pmc_product += 1
-                result.unmapped += 1
+                )
+            elif item.reason == REASON_NO_PMC_PRODUCT:
                 missing_c[_variant_label(attrs)] += 1
-            else:
-                result.unmapped += 1
-                result.no_pmc_product += 1
-                missing_c[_variant_label(attrs)] += 1
-                reason = REASON_NO_PMC_PRODUCT
 
             if len(result.examples) < example_limit:
                 result.examples.append(
-                    MappingExample(
-                        supplier_reference=sp.supplier_reference,
-                        designation=(sp.designation or "")[:160],
-                        extracted=attrs,
-                        candidate_code=match.product_code,
+                    _example(
+                        item,
                         status=match.status.upper(),
-                        reason=reason,
+                        reason=item.reason,
                         score=float(match.score) if match.score is not None else None,
-                        existing_product_id=sp.product_id,
                     )
                 )
-
-            if persist and not dry_run:
-                self._upsert_feature(sp.id, extraction)
-                self._upsert_proposal(sp.id, match)
-                result.persisted_features += 1
-                result.persisted_proposals += 1
 
         result.by_type = dict(type_c.most_common())
         result.by_thickness = dict(thick_c.most_common())
@@ -607,16 +504,6 @@ class ProductMappingService:
         result.by_variant = dict(variant_c.most_common())
         result.other_types = dict(other_type_c.most_common())
         result.missing_pmc_by_variant = dict(missing_c.most_common())
-
-        for sp_id, old_pid in snapshot_product_ids.items():
-            sp = self.session.get(SupplierProduct, sp_id)
-            if sp is not None and sp.product_id != old_pid:
-                raise RuntimeError(
-                    "Analyse dry-run ne doit jamais modifier SupplierProduct.product_id"
-                )
-
-        if persist and not dry_run:
-            self.session.flush()
         return result
 
     def apply_exact_plaque_platre(
@@ -625,99 +512,13 @@ class ProductMappingService:
         supplier_name: str = "BRICO_DEPOT",
         dry_run: bool = True,
     ) -> ApplyExactResult:
-        """Applique les mappings EXACT éligibles (transactionnel).
-
-        dry_run=True (défaut) : liste uniquement, aucune écriture product_id.
-        dry_run=False : écrit product_id + correction_source=exact_rule.
-        """
-        ensure_plaque_platre_category(self.session)
-        candidates = load_plaque_pmc_candidates(self.session)
-        out = ApplyExactResult(dry_run=dry_run)
-
-        supplier_ids = resolve_supplier_ids(self.session, supplier_name)
-        if not supplier_ids:
-            return out
-
-        sps = sql_plaque_candidates(self.session, supplier_ids, limit=None)
-        snapshot = {sp.id: (sp.product_id, sp.correction_source) for sp in sps}
-
-        def _run_apply() -> None:
-            for sp in sps:
-                extraction = extract_plaque_platre(designation=sp.designation or "")
-                out.analysed += 1
-                if not extraction.classified:
-                    continue
-
-                if sp.product_id is not None:
-                    out.already_mapped += 1
-                    continue
-
-                match = best_match(extraction.attributes, candidates)
-                if not is_exact_applicable(
-                    sp=sp, extraction_attrs=extraction.attributes, match=match
-                ):
-                    out.skipped += 1
-                    continue
-
-                assert match.product_id is not None and match.product_code
-                app = ExactApplication(
-                    supplier_product_id=sp.id,
-                    supplier_reference=sp.supplier_reference,
-                    designation=(sp.designation or "")[:200],
-                    product_id=match.product_id,
-                    product_code=match.product_code,
-                    extracted=dict(extraction.attributes),
-                )
-                out.exact_candidates += 1
-                out.applications.append(app)
-
-                if dry_run:
-                    continue
-
-                # Protections runtime
-                if sp.product_id is not None:
-                    out.skipped += 1
-                    out.exact_candidates -= 1
-                    out.applications.pop()
-                    continue
-                sp.product_id = match.product_id
-                sp.correction_source = CORRECTION_SOURCE_EXACT_RULE
-                out.applied += 1
-
-            if not dry_run:
-                self.session.flush()
-                # Vérif post-écriture : seuls les appliqués ont changé
-                for sp_id, (old_pid, old_src) in snapshot.items():
-                    sp = self.session.get(SupplierProduct, sp_id)
-                    if sp is None:
-                        continue
-                    applied_ids = {a.supplier_product_id for a in out.applications}
-                    if sp_id in applied_ids:
-                        if sp.product_id is None or sp.correction_source != CORRECTION_SOURCE_EXACT_RULE:
-                            raise RuntimeError(
-                                f"Application EXACT incomplète pour SP {sp_id}"
-                            )
-                    else:
-                        if sp.product_id != old_pid or sp.correction_source != old_src:
-                            raise RuntimeError(
-                                f"SP {sp_id} modifié hors périmètre EXACT"
-                            )
-
-        try:
-            if dry_run:
-                _run_apply()
-            else:
-                with self.session.begin_nested():
-                    _run_apply()
-        except Exception as exc:
-            out.errors += 1
-            out.error_messages.append(str(exc))
-            if not dry_run:
-                out.applied = 0
-                raise
-            raise
-
-        return out
+        """Applique les mappings EXACT PLAQUE éligibles (transactionnel)."""
+        return pipeline.apply_exact_for_rule(
+            self.session,
+            PLAQUE_PLATRE_RULE,
+            supplier_name=supplier_name,
+            dry_run=dry_run,
+        )
 
     @staticmethod
     def _interesting_not_category(designation: str) -> bool:
@@ -759,7 +560,7 @@ class ProductMappingService:
                 continue
             if sp.product_id is not None:
                 continue
-            match = best_match(extraction.attributes, candidates)
+            match = best_match(PLAQUE_PLATRE_RULE, extraction.attributes, candidates)
             reason = match.reason or ""
             if reason not in {
                 REASON_REVIEW,
@@ -868,398 +669,145 @@ class ProductMappingService:
         dims_c[_dims_label(attrs)] += 1
         variant_c[_variant_label(attrs)] += 1
 
-    def _upsert_feature(self, sp_id: int, extraction) -> None:
-        row = self.session.scalar(
-            select(SupplierProductFeature).where(
-                SupplierProductFeature.supplier_product_id == sp_id
-            )
+    # ------------------------------------------------------------------
+    # OSSATURE_PLACO
+    # ------------------------------------------------------------------
+
+    def run_ossature_placo(
+        self,
+        *,
+        supplier_name: str = "BRICO_DEPOT",
+        limit: int | None = 50,
+        all_candidates: bool = False,
+        example_limit: int = 10,
+    ) -> OssatureRunResult:
+        """Analyse dry-run OSSATURE_PLACO — jamais d'écriture product_id."""
+        run = pipeline.run_category(
+            self.session,
+            OSSATURE_PLACO_RULE,
+            supplier_name=supplier_name,
+            limit=limit,
+            all_candidates=all_candidates,
+            example_limit=example_limit,
+            persist=False,
+            dry_run=True,
         )
-        conf = (
-            Decimal(str(extraction.confidence))
-            if extraction.confidence is not None
-            else None
-        )
-        if row is None:
-            self.session.add(
-                SupplierProductFeature(
-                    supplier_product_id=sp_id,
-                    category_code=extraction.category_code or CATEGORY_PLAQUE_PLATRE,
-                    attributes=extraction.attributes,
-                    extractor_version=extraction.extractor_version
-                    or EXTRACTOR_VERSION_PLAQUE_V1,
-                    confidence=conf,
+        return self._ossature_report(run, example_limit=example_limit)
+
+    def _ossature_report(
+        self, run: CategoryRunResult, *, example_limit: int
+    ) -> OssatureRunResult:
+        result = OssatureRunResult()
+        result.supplier_product_total = run.supplier_product_total
+        result.initial_candidates = run.initial_candidates
+        result.analysed = run.analysed
+        result.not_this_category = run.not_this_category
+        result.true_elements = run.classified
+        result.already_mapped = run.already_mapped
+        result.exact = run.exact
+        result.review = run.review
+        result.ambiguous = run.ambiguous
+        result.no_pmc_product = run.no_pmc_product
+        result.insufficient_data = run.insufficient_data
+
+        missing_c: Counter[str] = Counter()
+
+        for item in run.items:
+            sp = item.sp
+            if item.outcome == OUTCOME_NOT_THIS_CATEGORY:
+                if len(result.false_positive_samples) < 15:
+                    result.false_positive_samples.append((sp.designation or "")[:120])
+                continue
+
+            attrs = item.attrs
+            kind = attrs.get("kind")
+            if kind == KIND_RAIL:
+                result.rails += 1
+            elif kind == KIND_MONTANT:
+                result.montants += 1
+            elif kind == KIND_FOURRURE:
+                result.fourrures += 1
+
+            length = attrs.get("length_mm")
+            # Rapport : longueurs réelles 2490/2990 (nominales 2500/3000)
+            if length in {2490, 2990}:
+                result.near_length_cases.append(
+                    {
+                        "id": sp.id,
+                        "supplier_reference": sp.supplier_reference,
+                        "designation": sp.designation,
+                        "brand": sp.brand,
+                        "kind": kind,
+                        "profile": attrs.get("profile"),
+                        "length_mm": length,
+                        "nominal_length_mm": attrs.get("nominal_length_mm"),
+                        "pair": "2490/2500" if length == 2490 else "2990/3000",
+                        "product_id": sp.product_id,
+                        "correction_source": sp.correction_source,
+                    }
                 )
-            )
-        else:
-            row.category_code = extraction.category_code or CATEGORY_PLAQUE_PLATRE
-            row.attributes = extraction.attributes
-            row.extractor_version = extraction.extractor_version
-            row.confidence = conf
 
-    def _upsert_proposal(self, sp_id: int, match) -> None:
-        self.session.add(
-            ProductMappingProposal(
-                supplier_product_id=sp_id,
-                product_id=match.product_id,
-                status=match.status,
-                score=Decimal(str(match.score)) if match.score is not None else None,
-                score_breakdown={
-                    **(match.breakdown or {}),
-                    "reason": match.reason,
-                },
-                algorithm_version=match.algorithm_version or ALGORITHM_VERSION_PLAQUE_V1,
-            )
-        )
+            if item.outcome == OUTCOME_ALREADY_MAPPED:
+                if len(result.examples) < example_limit:
+                    result.examples.append(
+                        _example(
+                            item,
+                            status="ALREADY_MAPPED",
+                            reason=REASON_ALREADY_MAPPED,
+                            score=None,
+                        )
+                    )
+                continue
 
+            match = item.match
+            assert match is not None
+            if item.reason == REASON_INSUFFICIENT_DATA:
+                result.insufficient_cases.append(
+                    _ossature_insufficient_case(sp, attrs)
+                )
+            elif item.reason == REASON_NO_PMC_PRODUCT:
+                missing_c[_ossature_variant_label(attrs)] += 1
 
-OSSATURE_ATTR_DEFS: list[dict[str, Any]] = [
-    {
-        "key": "kind",
-        "data_type": "enum",
-        "required": True,
-        "match_role": "identity",
-        "enum_values": [KIND_RAIL, KIND_MONTANT, KIND_FOURRURE],
-    },
-    {
-        "key": "profile",
-        "data_type": "enum",
-        "required": True,
-        "match_role": "identity",
-        "enum_values": ["R48", "R70", "R90", "R100", "M48", "M70", "M90", "F45"],
-    },
-    {
-        "key": "length_mm",
-        "data_type": "int",
-        "required": True,
-        "unit": "mm",
-        "match_role": "identity",
-    },
-]
-
-_SQL_OSSATURE_FILTERS = (
-    SupplierProduct.designation.ilike("%rail%"),
-    SupplierProduct.designation.ilike("%montant%"),
-    SupplierProduct.designation.ilike("%fourrure%"),
-    SupplierProduct.designation.ilike("%R48%"),
-    SupplierProduct.designation.ilike("%R70%"),
-    SupplierProduct.designation.ilike("%M48%"),
-    SupplierProduct.designation.ilike("%M70%"),
-    SupplierProduct.designation.ilike("%F45%"),
-    SupplierProduct.designation.ilike("%ossature%"),
-)
-
-
-@dataclass
-class OssatureRunResult:
-    supplier_product_total: int = 0
-    initial_candidates: int = 0
-    not_this_category: int = 0
-    true_elements: int = 0
-    rails: int = 0
-    montants: int = 0
-    fourrures: int = 0
-    already_mapped: int = 0
-    exact: int = 0
-    review: int = 0
-    no_pmc_product: int = 0
-    insufficient_data: int = 0
-    ambiguous: int = 0
-    analysed: int = 0
-    missing_pmc_by_variant: dict[str, int] = field(default_factory=dict)
-    near_length_cases: list[dict[str, Any]] = field(default_factory=list)
-    insufficient_cases: list[dict[str, Any]] = field(default_factory=list)
-    examples: list[MappingExample] = field(default_factory=list)
-    false_positive_samples: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict:
-        return {
-            "supplier_product_total": self.supplier_product_total,
-            "initial_candidates": self.initial_candidates,
-            "not_this_category": self.not_this_category,
-            "true_elements": self.true_elements,
-            "rails": self.rails,
-            "montants": self.montants,
-            "fourrures": self.fourrures,
-            "already_mapped": self.already_mapped,
-            "exact": self.exact,
-            "review": self.review,
-            "no_pmc_product": self.no_pmc_product,
-            "insufficient_data": self.insufficient_data,
-            "ambiguous": self.ambiguous,
-            "analysed": self.analysed,
-            "missing_pmc_by_variant": self.missing_pmc_by_variant,
-            "near_length_cases": self.near_length_cases,
-            "insufficient_cases": self.insufficient_cases,
-            "false_positive_samples": self.false_positive_samples,
-            "examples": [
-                {
-                    "supplier_reference": e.supplier_reference,
-                    "designation": e.designation,
-                    "extracted": e.extracted,
-                    "candidate": e.candidate_code,
-                    "status": e.status,
-                    "reason": e.reason,
-                    "score": e.score,
-                    "existing_product_id": e.existing_product_id,
-                }
-                for e in self.examples
-            ],
-        }
-
-
-def ensure_ossature_placo_category(session: Session) -> ProductCategory:
-    cat = session.scalar(
-        select(ProductCategory).where(ProductCategory.code == CATEGORY_OSSATURE_PLACO)
-    )
-    if cat is None:
-        cat = ProductCategory(
-            code=CATEGORY_OSSATURE_PLACO,
-            name="Ossature placo",
-            parent_id=None,
-            reference_unit_default="pièce",
-            schema_version="1",
-        )
-        session.add(cat)
-        session.flush()
-    existing_keys = {
-        d.key
-        for d in session.scalars(
-            select(ProductAttributeDef).where(ProductAttributeDef.category_id == cat.id)
-        ).all()
-    }
-    for spec in OSSATURE_ATTR_DEFS:
-        if spec["key"] in existing_keys:
-            continue
-        session.add(
-            ProductAttributeDef(
-                category_id=cat.id,
-                key=spec["key"],
-                data_type=spec["data_type"],
-                required=bool(spec.get("required")),
-                unit=spec.get("unit"),
-                enum_values=spec.get("enum_values"),
-                match_role=spec.get("match_role", "optional"),
-            )
-        )
-    session.flush()
-    return cat
-
-
-def load_ossature_pmc_candidates(
-    session: Session,
-) -> list[tuple[int, str, dict | None, str | None]]:
-    rows = session.scalars(
-        select(Product).where(
-            or_(
-                Product.code.like("PMC-RAIL-%"),
-                Product.code.like("PMC-MONTANT-%"),
-                Product.code.like("PMC-FOURRURE-%"),
-                Product.category == "Ossature",
-            ),
-            Product.is_active.is_(True),
-        )
-    ).all()
-    return [(p.id, p.code, p.attributes, p.subcategory) for p in rows]
-
-
-def sql_ossature_candidates(
-    session: Session,
-    supplier_ids: list[int],
-    *,
-    limit: int | None = None,
-) -> list[SupplierProduct]:
-    q = (
-        select(SupplierProduct)
-        .where(
-            SupplierProduct.supplier_id.in_(supplier_ids),
-            or_(*_SQL_OSSATURE_FILTERS),
-        )
-        .order_by(SupplierProduct.id)
-    )
-    if limit is not None:
-        q = q.limit(limit)
-    return list(session.scalars(q).all())
-
-
-def _ossature_variant_label(attrs: dict[str, Any]) -> str:
-    # Regroupement NO_PMC sur longueur nominale (identité matching)
-    ln = attrs.get("nominal_length_mm")
-    if ln is None:
-        ln = attrs.get("length_mm")
-    return (
-        f"{attrs.get('kind') or '?'} "
-        f"{attrs.get('profile') or '?'} "
-        f"{ln if ln is not None else '?'}"
-    )
-
-
-def _run_ossature_placo(
-    self: ProductMappingService,
-    *,
-    supplier_name: str = "BRICO_DEPOT",
-    limit: int | None = 50,
-    all_candidates: bool = False,
-    example_limit: int = 10,
-) -> OssatureRunResult:
-    """Analyse dry-run OSSATURE_PLACO — jamais d'écriture product_id."""
-    ensure_ossature_placo_category(self.session)
-    candidates = load_ossature_pmc_candidates(self.session)
-    result = OssatureRunResult()
-
-    supplier_ids = resolve_supplier_ids(self.session, supplier_name)
-    if not supplier_ids:
-        return result
-
-    result.supplier_product_total = int(
-        self.session.scalar(
-            select(func.count())
-            .select_from(SupplierProduct)
-            .where(SupplierProduct.supplier_id.in_(supplier_ids))
-        )
-        or 0
-    )
-
-    fetch_limit = None if all_candidates else max((limit or 50) * 20, 200)
-    sps = sql_ossature_candidates(self.session, supplier_ids, limit=fetch_limit)
-    result.initial_candidates = len(sps)
-    snapshot = {sp.id: sp.product_id for sp in sps}
-    missing_c: Counter[str] = Counter()
-
-    for sp in sps:
-        if not all_candidates and limit is not None and result.true_elements >= limit:
-            break
-
-        extraction = ox.extract_ossature_placo(designation=sp.designation or "")
-        result.analysed += 1
-
-        if not extraction.classified:
-            result.not_this_category += 1
-            if len(result.false_positive_samples) < 15:
-                result.false_positive_samples.append((sp.designation or "")[:120])
-            continue
-
-        result.true_elements += 1
-        attrs = extraction.attributes
-        kind = attrs.get("kind")
-        if kind == KIND_RAIL:
-            result.rails += 1
-        elif kind == KIND_MONTANT:
-            result.montants += 1
-        elif kind == KIND_FOURRURE:
-            result.fourrures += 1
-
-        length = attrs.get("length_mm")
-        # Rapport : longueurs réelles 2490/2990 (nominales 2500/3000)
-        if length in {2490, 2990}:
-            pair = "2490/2500" if length == 2490 else "2990/3000"
-            result.near_length_cases.append(
-                {
-                    "id": sp.id,
-                    "supplier_reference": sp.supplier_reference,
-                    "designation": sp.designation,
-                    "brand": sp.brand,
-                    "kind": kind,
-                    "profile": attrs.get("profile"),
-                    "length_mm": length,
-                    "nominal_length_mm": attrs.get("nominal_length_mm"),
-                    "pair": pair,
-                    "product_id": sp.product_id,
-                    "correction_source": sp.correction_source,
-                }
-            )
-
-        if sp.product_id is not None:
-            result.already_mapped += 1
             if len(result.examples) < example_limit:
                 result.examples.append(
-                    MappingExample(
-                        supplier_reference=sp.supplier_reference,
-                        designation=(sp.designation or "")[:160],
-                        extracted=attrs,
-                        candidate_code=None,
-                        status="ALREADY_MAPPED",
-                        reason=ox.REASON_ALREADY_MAPPED,
-                        score=None,
-                        existing_product_id=sp.product_id,
+                    _example(
+                        item,
+                        status=match.status.upper(),
+                        reason=item.reason,
+                        score=float(match.score) if match.score is not None else None,
                     )
                 )
-            continue
 
-        match = om.best_match(attrs, candidates)
-        reason = match.reason or ""
-        if reason == ox.REASON_EXACT:
-            result.exact += 1
-        elif reason == ox.REASON_AMBIGUOUS:
-            result.ambiguous += 1
-        elif reason == ox.REASON_REVIEW:
-            result.review += 1
-        elif reason == ox.REASON_INSUFFICIENT_DATA:
-            result.insufficient_data += 1
-            missing = []
-            if attrs.get("kind") is None:
-                missing.append("kind")
-            if attrs.get("profile") is None:
-                missing.append("profile")
-            if attrs.get("length_mm") is None:
-                missing.append("length_mm")
-            if attrs.get("nominal_length_mm") is None:
-                missing.append("nominal_length_mm")
-            # Heuristique A/B : indices profil dans designation sans extraction
-            des = sp.designation or ""
-            group = "B_INFORMATION_REELLEMENT_ABSENTE"
-            hint = None
-            if "profile" in missing:
-                if re.search(r"R\s*\d{2}\d{2}|F\s*\d{2}\d{2}|M\s*\d{2}\d{2}", des, re.I):
-                    group = "A_INFORMATION_PRESENTE_MAIS_NON_EXTRAITE"
-                    hint = "code compact type R4830/F4518/M4835"
-                elif re.search(r"\b45\s*mm\b|\b48\s*mm\b|\b70\s*mm\b", des, re.I):
-                    group = "A_INFORMATION_PRESENTE_MAIS_NON_EXTRAITE"
-                    hint = "largeur mm sans lettre de profil (R/M/F)"
-            result.insufficient_cases.append(
-                {
-                    "id": sp.id,
-                    "supplier_reference": sp.supplier_reference,
-                    "designation": des,
-                    "kind": attrs.get("kind"),
-                    "profile": attrs.get("profile"),
-                    "length_mm": attrs.get("length_mm"),
-                    "nominal_length_mm": attrs.get("nominal_length_mm"),
-                    "missing": missing,
-                    "group": group,
-                    "hint": hint,
-                }
-            )
-        elif reason == ox.REASON_NO_PMC_PRODUCT:
-            result.no_pmc_product += 1
-            missing_c[_ossature_variant_label(attrs)] += 1
-        else:
-            result.no_pmc_product += 1
-            missing_c[_ossature_variant_label(attrs)] += 1
-            reason = ox.REASON_NO_PMC_PRODUCT
-
-        if len(result.examples) < example_limit:
-            result.examples.append(
-                MappingExample(
-                    supplier_reference=sp.supplier_reference,
-                    designation=(sp.designation or "")[:160],
-                    extracted=attrs,
-                    candidate_code=match.product_code,
-                    status=match.status.upper(),
-                    reason=reason,
-                    score=float(match.score) if match.score is not None else None,
-                    existing_product_id=sp.product_id,
-                )
-            )
-
-    result.missing_pmc_by_variant = dict(missing_c.most_common())
-
-    for sp_id, old_pid in snapshot.items():
-        sp = self.session.get(SupplierProduct, sp_id)
-        if sp is not None and sp.product_id != old_pid:
-            raise RuntimeError(
-                "Analyse OSSATURE dry-run ne doit jamais modifier product_id"
-            )
-    return result
+        result.missing_pmc_by_variant = dict(missing_c.most_common())
+        return result
 
 
-ProductMappingService.run_ossature_placo = _run_ossature_placo  # type: ignore[attr-defined]
+def _ossature_insufficient_case(sp, attrs: dict[str, Any]) -> dict[str, Any]:
+    """Diagnostic A/B : information absente vs présente mais non extraite."""
+    missing = [
+        key
+        for key in ("kind", "profile", "length_mm", "nominal_length_mm")
+        if attrs.get(key) is None
+    ]
+    des = sp.designation or ""
+    group = "B_INFORMATION_REELLEMENT_ABSENTE"
+    hint = None
+    if "profile" in missing:
+        if re.search(r"R\s*\d{2}\d{2}|F\s*\d{2}\d{2}|M\s*\d{2}\d{2}", des, re.I):
+            group = "A_INFORMATION_PRESENTE_MAIS_NON_EXTRAITE"
+            hint = "code compact type R4830/F4518/M4835"
+        elif re.search(r"\b45\s*mm\b|\b48\s*mm\b|\b70\s*mm\b", des, re.I):
+            group = "A_INFORMATION_PRESENTE_MAIS_NON_EXTRAITE"
+            hint = "largeur mm sans lettre de profil (R/M/F)"
+    return {
+        "id": sp.id,
+        "supplier_reference": sp.supplier_reference,
+        "designation": des,
+        "kind": attrs.get("kind"),
+        "profile": attrs.get("profile"),
+        "length_mm": attrs.get("length_mm"),
+        "nominal_length_mm": attrs.get("nominal_length_mm"),
+        "missing": missing,
+        "group": group,
+        "hint": hint,
+    }

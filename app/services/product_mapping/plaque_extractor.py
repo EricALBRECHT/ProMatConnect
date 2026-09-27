@@ -1,20 +1,45 @@
 """Extracteur / classifieur déterministe PLAQUE_PLATRE V1.3.
 
 Jamais de false inventé pour une info absente → null (unknown).
+Les primitives texte / dimensions sont mutualisées (primitives/).
 """
 
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from app.models.product_mapping import (
     CATEGORY_PLAQUE_PLATRE,
     EXTRACTOR_VERSION_PLAQUE_V1,
 )
+from app.services.product_mapping.primitives.dimensions import (
+    extract_dimensions_mm,
+    extract_length_width_mm,
+    extract_thickness_alone_mm,
+)
+from app.services.product_mapping.primitives.textutil import fold as _fold
+from app.services.product_mapping.rules.plaque_platre import (
+    BOOL_COMPAT_KEYS,
+    DIM_KEYS,
+    IDENTITY_KEYS,
+)
+
+__all__ = [
+    "ExtractionResult",
+    "diagnose_attribute_gaps",
+    "dims_present",
+    "extract_dimensions_mm",
+    "extract_length_width_mm",
+    "extract_plaque_platre",
+    "extract_plaque_type_and_flags",
+    "extract_thickness_alone_mm",
+    "identity_attrs_sufficient",
+    "infer_thickness_from_ba",
+    "is_accessory_not_plaque",
+    "looks_like_plaque_platre",
+]
 
 # Raisons d'analyse
 REASON_NOT_THIS_CATEGORY = "NOT_THIS_CATEGORY"
@@ -105,66 +130,6 @@ _PLAQUE_STRONG = re.compile(
     re.I,
 )
 
-
-def _fold(text: str) -> str:
-    nfkd = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
-
-
-def _parse_number(raw: str) -> Decimal | None:
-    text = raw.strip().replace(" ", "").replace(",", ".")
-    try:
-        return Decimal(text)
-    except (InvalidOperation, ValueError):
-        return None
-
-
-def _to_mm(value: Decimal, unit: str | None) -> int | None:
-    """Conversion en mm ; arrondi half-up (1,25 cm → 13 mm)."""
-    u = (unit or "").lower().replace(" ", "")
-    if u in {"m", "ml", "metre"}:
-        mm = value * 1000
-    elif u in {"cm"}:
-        mm = value * 10
-    elif u in {"mm", ""}:
-        if unit is None and value < Decimal("20"):
-            mm = value * 1000
-        else:
-            mm = value
-    else:
-        mm = value
-    mm_i = int(mm.to_integral_value(rounding=ROUND_HALF_UP))
-    if mm_i <= 0 or mm_i > 10000:
-        return None
-    return mm_i
-
-
-_DIM_TRIPLE = re.compile(
-    r"(?:l\.?\s*)?(?P<l>\d+(?:[.,]\d+)?)\s*(?P<ul>mm|cm|m)?\s*[x×*]\s*"
-    r"(?:l\.?\s*)?(?P<w>\d+(?:[.,]\d+)?)\s*(?P<uw>mm|cm|m)?\s*[x×*]\s*"
-    r"(?:epaisseur|épaisseur|ep\.?\s*|ép\.?\s*|e\.?\s*)?(?P<t>\d+(?:[.,]\d+)?)\s*(?P<ut>mm|cm|m)?",
-    re.I,
-)
-_DIM_LABELED = re.compile(
-    r"l\.?\s*(?P<l>\d+(?:[.,]\d+)?)\s*(?P<ul>mm|cm|m)?\s*[x×*]?\s*"
-    r"l\.?\s*(?P<w>\d+(?:[.,]\d+)?)\s*(?P<uw>mm|cm|m)?\s*[x×*]?\s*"
-    r"(?:epaisseur|épaisseur|ep\.?|ép\.?|e\.?)\s*(?P<t>\d+(?:[.,]\d+)?)\s*(?P<ut>mm|cm|m)?",
-    re.I,
-)
-
-# L × l sans épaisseur (labels optionnels) — ex. "2,50 x 1,20 m", "2,5 X 1,2M"
-_DIM_PAIR = re.compile(
-    r"(?:l\.?\s*)?(?P<l>\d+(?:[.,]\d+)?)\s*(?P<ul>mm|cm|m)?\s*[x×*]\s*"
-    r"(?:l\.?\s*)?(?P<w>\d+(?:[.,]\d+)?)\s*(?P<uw>mm|cm|m)?",
-    re.I,
-)
-
-# Épaisseur seule — ex. "ép. 13 mm", "épaisseur 1,25 cm"
-_THICKNESS_ONLY = re.compile(
-    r"(?:epaisseur|épaisseur|ép\.?|ep\.?)\s*(?P<t>\d+(?:[.,]\d+)?)\s*(?P<ut>mm|cm|m)?",
-    re.I,
-)
-
 _FIRE_MARKERS = (
     "coupe-feu",
     "coupe feu",
@@ -223,101 +188,6 @@ def looks_like_plaque_platre(designation: str, category_path: str | None = None)
     return False
 
 
-def _apply_shared_unit(
-    ul: str | None, uw: str | None
-) -> tuple[str | None, str | None]:
-    """Si une seule unité est présente sur L×l, l'appliquer aux deux."""
-    if ul and not uw:
-        return ul, ul
-    if uw and not ul:
-        return uw, uw
-    return ul, uw
-
-
-def _pair_to_mm(
-    l_raw: str, w_raw: str, ul: str | None, uw: str | None
-) -> tuple[int | None, int | None]:
-    l = _parse_number(l_raw)
-    w = _parse_number(w_raw)
-    if l is None or w is None:
-        return None, None
-    ul, uw = _apply_shared_unit(ul, uw)
-    length = _to_mm(l, ul)
-    width = _to_mm(w, uw)
-    if length and width:
-        if width > length:
-            length, width = width, length
-        return length, width
-    return None, None
-
-
-def extract_dimensions_mm(text: str) -> tuple[int | None, int | None, int | None]:
-    normalized = text.replace("×", "x")
-    for pattern in (_DIM_LABELED, _DIM_TRIPLE):
-        m = pattern.search(normalized)
-        if not m:
-            continue
-        # Rejeter « 13 + 80 » (doublage) — le groupe t ne doit pas être suivi de +
-        t_span = m.end("t")
-        if t_span < len(normalized) and normalized[t_span : t_span + 2].lstrip().startswith(
-            "+"
-        ):
-            continue
-        l = _parse_number(m.group("l"))
-        w = _parse_number(m.group("w"))
-        t = _parse_number(m.group("t"))
-        if l is None or w is None or t is None:
-            continue
-        ul, uw = _apply_shared_unit(m.group("ul"), m.group("uw"))
-        length = _to_mm(l, ul)
-        width = _to_mm(w, uw)
-        t_unit = m.group("ut")
-        if t_unit:
-            thickness = _to_mm(t, t_unit)
-        else:
-            thickness = (
-                int(t.to_integral_value(rounding=ROUND_HALF_UP))
-                if t < 100
-                else _to_mm(t, "mm")
-            )
-        if length and width and thickness:
-            if width > length:
-                length, width = width, length
-            return length, width, thickness
-    return None, None, None
-
-
-def extract_length_width_mm(text: str) -> tuple[int | None, int | None]:
-    """L × l sans épaisseur — labels optionnels.
-
-    Exemples Brico :
-    - « BA 13 hydrofuge NF - 2,50 x 1,20 m »
-    - « Plaque BA13 NF standard - 2,5 X 1,2M »
-    - « 120x250 cm »
-    - « 250 cm x 120 cm »
-    """
-    m = _DIM_PAIR.search(text.replace("×", "x"))
-    if not m:
-        return None, None
-    return _pair_to_mm(m.group("l"), m.group("w"), m.group("ul"), m.group("uw"))
-
-
-def extract_thickness_alone_mm(text: str) -> int | None:
-    """Épaisseur isolée — ex. « ép. 13 mm », « épaisseur 1,25 cm »."""
-    m = _THICKNESS_ONLY.search(text.replace("×", "x"))
-    if not m:
-        return None
-    t = _parse_number(m.group("t"))
-    if t is None:
-        return None
-    ut = m.group("ut")
-    if ut:
-        return _to_mm(t, ut)
-    if t < 100:
-        return int(t.to_integral_value(rounding=ROUND_HALF_UP))
-    return _to_mm(t, "mm")
-
-
 def extract_plaque_type_and_flags(text: str) -> dict[str, Any]:
     blob = _fold(text)
     out: dict[str, Any] = {
@@ -354,6 +224,7 @@ def extract_plaque_type_and_flags(text: str) -> dict[str, Any]:
 
 
 def infer_thickness_from_ba(text: str) -> int | None:
+    """Épaisseur déduite du code commercial BA — « BA13 » → 13 mm."""
     m = _BA_THICKNESS.search(_fold(text))
     if not m:
         return None
@@ -423,16 +294,11 @@ def extract_plaque_platre(
 
 
 def identity_attrs_sufficient(attrs: dict[str, Any]) -> bool:
-    return all(
-        attrs.get(k) is not None
-        for k in ("length_mm", "width_mm", "thickness_mm", "type")
-    )
+    return all(attrs.get(k) is not None for k in IDENTITY_KEYS)
 
 
 def dims_present(attrs: dict[str, Any]) -> bool:
-    return all(
-        attrs.get(k) is not None for k in ("length_mm", "width_mm", "thickness_mm")
-    )
+    return all(attrs.get(k) is not None for k in DIM_KEYS)
 
 
 def diagnose_attribute_gaps(
@@ -450,19 +316,13 @@ def diagnose_attribute_gaps(
         gaps.append(GAP_MISSING_THICKNESS)
     if attrs.get("type") is None:
         gaps.append(GAP_MISSING_TYPE)
-    present = sum(
-        1
-        for k in ("length_mm", "width_mm", "thickness_mm")
-        if attrs.get(k) is not None
-    )
-    if 0 < present < 3:
+    present = sum(1 for k in DIM_KEYS if attrs.get(k) is not None)
+    if 0 < present < len(DIM_KEYS):
         gaps.append(GAP_PARTIAL_DIMENSIONS)
     # Flags fonctionnels absents ≠ false — signal diagnostique seulement
     if (
         attrs.get("type") in {None, "standard"}
-        and attrs.get("hydrofuge") is None
-        and attrs.get("fire_resistant") is None
-        and attrs.get("acoustic") is None
+        and all(attrs.get(k) is None for k in BOOL_COMPAT_KEYS)
         and match_reason == REASON_REVIEW
     ):
         gaps.append(GAP_UNKNOWN_FUNCTIONAL_FLAG)
