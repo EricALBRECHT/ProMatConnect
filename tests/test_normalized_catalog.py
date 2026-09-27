@@ -42,10 +42,29 @@ def test_ba13_variants_are_distinct_products(session):
         "PMC-BA13-HYDRO-2500X1200",
         "PMC-BA13-MULTI-2500X1200",
         "PMC-BA13-LIGHT-2500X1200",
+        "PMC-BA13-HYDRO-2500X600",
+        "PMC-BA13-PHONI-2500X1200",
+        "PMC-BA10-STD-2500X1200",
+        "PMC-BA13-HYDRO-1250X600",
+        "PMC-BA13-FEU-2500X1200",
+        "PMC-BA13-STD-1250X600",
+        "PMC-BA13-STD-3000X1200",
     ]
     products = list(session.scalars(select(Product).where(Product.code.in_(codes))))
-    assert len(products) == 4
-    assert len({p.id for p in products}) == 4
+    assert len(products) == 11
+    assert len({p.id for p in products}) == 11
+    ba10 = next(p for p in products if p.code == "PMC-BA10-STD-2500X1200")
+    assert ba10.attributes["thickness_mm"] == 10
+    assert "BA13" not in ba10.name
+    assert ba10.name.startswith("Plaque BA10")
+    std3m = next(p for p in products if p.code == "PMC-BA13-STD-3000X1200")
+    assert std3m.attributes == {
+        "length_mm": 3000,
+        "width_mm": 1200,
+        "thickness_mm": 13,
+        "type": "standard",
+        "surface_m2": 3.6,
+    }
 
 
 def test_insulation_lambda_variants_distinct(session):

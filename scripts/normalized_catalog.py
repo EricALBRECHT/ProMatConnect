@@ -84,6 +84,113 @@ NORMALIZED_PRODUCTS: list[tuple] = [
         },
         "Plaque BA13 légère / Purelight — quantité = pièces (surface technique 3,0 m²).",
     ),
+    # V1.2 — variantes manquantes identifiées par analyse PLAQUE_PLATRE
+    (
+        "PMC-BA13-HYDRO-2500X600",
+        "Plaque BA13 hydrofuge 2500 × 600 × 13 mm",
+        "Plâtrerie",
+        "Plaques de plâtre",
+        "pièce",
+        {
+            "length_mm": 2500,
+            "width_mm": 600,
+            "thickness_mm": 13,
+            "type": "hydrofuge",
+            "surface_m2": 1.5,
+        },
+        "Plaque BA13 hydrofuge format étroit — quantité = pièces (surface technique 1,5 m²).",
+    ),
+    (
+        "PMC-BA13-PHONI-2500X1200",
+        "Plaque BA13 phonique 2500 × 1200 × 13 mm",
+        "Plâtrerie",
+        "Plaques de plâtre",
+        "pièce",
+        {
+            "length_mm": 2500,
+            "width_mm": 1200,
+            "thickness_mm": 13,
+            "type": "phonique",
+            "surface_m2": 3.0,
+        },
+        "Plaque BA13 phonique / acoustique — quantité = pièces (surface technique 3,0 m²).",
+    ),
+    (
+        "PMC-BA10-STD-2500X1200",
+        "Plaque BA10 standard 2500 × 1200 × 10 mm",
+        "Plâtrerie",
+        "Plaques de plâtre",
+        "pièce",
+        {
+            "length_mm": 2500,
+            "width_mm": 1200,
+            "thickness_mm": 10,
+            "type": "standard",
+            "surface_m2": 3.0,
+        },
+        "Plaque BA10 standard 10 mm — distincte de BA13 ; quantité = pièces (surface 3,0 m²).",
+    ),
+    (
+        "PMC-BA13-HYDRO-1250X600",
+        "Plaque BA13 hydrofuge 1250 × 600 × 13 mm",
+        "Plâtrerie",
+        "Plaques de plâtre",
+        "pièce",
+        {
+            "length_mm": 1250,
+            "width_mm": 600,
+            "thickness_mm": 13,
+            "type": "hydrofuge",
+            "surface_m2": 0.75,
+        },
+        "Plaque BA13 hydrofuge demi-format — quantité = pièces (surface technique 0,75 m²).",
+    ),
+    (
+        "PMC-BA13-FEU-2500X1200",
+        "Plaque BA13 feu / résistante au feu 2500 × 1200 × 13 mm",
+        "Plâtrerie",
+        "Plaques de plâtre",
+        "pièce",
+        {
+            "length_mm": 2500,
+            "width_mm": 1200,
+            "thickness_mm": 13,
+            "type": "feu",
+            "surface_m2": 3.0,
+        },
+        "Plaque BA13 résistante au feu — distincte du standard ; quantité = pièces (3,0 m²).",
+    ),
+    (
+        "PMC-BA13-STD-1250X600",
+        "Plaque BA13 standard 1250 × 600 × 13 mm",
+        "Plâtrerie",
+        "Plaques de plâtre",
+        "pièce",
+        {
+            "length_mm": 1250,
+            "width_mm": 600,
+            "thickness_mm": 13,
+            "type": "standard",
+            "surface_m2": 0.75,
+        },
+        "Plaque BA13 standard demi-format — quantité = pièces (surface technique 0,75 m²).",
+    ),
+    # V1.4 — format 3,00 m observé Brico (SP 17113)
+    (
+        "PMC-BA13-STD-3000X1200",
+        "Plaque BA13 standard 3000 × 1200 × 13 mm",
+        "Plâtrerie",
+        "Plaques de plâtre",
+        "pièce",
+        {
+            "length_mm": 3000,
+            "width_mm": 1200,
+            "thickness_mm": 13,
+            "type": "standard",
+            "surface_m2": 3.6,
+        },
+        "Plaque BA13 standard 3,00 m — quantité = pièces (surface technique 3,6 m²).",
+    ),
     (
         "PMC-RAIL-R48-3000",
         "Rail R48 3 m",
@@ -255,17 +362,56 @@ NORMALIZED_PRODUCTS: list[tuple] = [
 
 NORMALIZED_PRODUCT_COUNT = len(NORMALIZED_PRODUCTS)
 
+_PLAQUE_IDENTITY_KEYS = ("length_mm", "width_mm", "thickness_mm", "type")
+_PLAQUE_CODE_PREFIXES = ("PMC-BA10-", "PMC-BA13-", "PMC-BA15-", "PMC-BA18-")
+
+
+def _plaque_identity(attrs: dict | None) -> tuple | None:
+    if not attrs:
+        return None
+    vals = tuple(attrs.get(k) for k in _PLAQUE_IDENTITY_KEYS)
+    if any(v is None for v in vals):
+        return None
+    return vals
+
+
+def _find_equivalent_plaque(
+    session: Session, attributes: dict, *, exclude_code: str | None = None
+) -> Product | None:
+    """Product plaque déjà présent avec mêmes dims + type (évite doublon technique)."""
+    target = _plaque_identity(attributes)
+    if target is None:
+        return None
+    rows = session.scalars(
+        select(Product).where(
+            Product.subcategory == "Plaques de plâtre",
+            Product.is_active.is_(True),
+        )
+    ).all()
+    for p in rows:
+        if exclude_code and p.code == exclude_code:
+            continue
+        if _plaque_identity(p.attributes) == target:
+            return p
+    return None
+
 
 def seed_normalized_catalog(session: Session) -> int:
     """Crée les Product normalisés manquants. Corrige l'unité ossature si besoin.
 
     Ne touche pas aux Product historiques PMC000x (legacy).
+    Idempotent : code existant OU équivalence technique plaque (L/l/Ep/type).
     """
     created = 0
     corrected = 0
     for code, name, category, subcategory, unit, attributes, description in NORMALIZED_PRODUCTS:
         existing = session.scalar(select(Product).where(Product.code == code))
         if existing is None:
+            # Doublon technique plaque (autre code, mêmes attributs identity)
+            if subcategory == "Plaques de plâtre":
+                twin = _find_equivalent_plaque(session, attributes)
+                if twin is not None:
+                    continue
             session.add(
                 Product(
                     code=code,
@@ -282,7 +428,9 @@ def seed_normalized_catalog(session: Session) -> int:
             created += 1
             continue
         # Correction non destructive des Product normalisés (ossature + plaques).
-        if code.startswith(("PMC-RAIL-", "PMC-MONTANT-", "PMC-FOURRURE-", "PMC-BA13-")):
+        if code.startswith(
+            ("PMC-RAIL-", "PMC-MONTANT-", "PMC-FOURRURE-", *_PLAQUE_CODE_PREFIXES)
+        ):
             changed = False
             if existing.reference_unit != unit:
                 existing.reference_unit = unit
