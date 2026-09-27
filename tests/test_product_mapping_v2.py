@@ -28,10 +28,12 @@ from app.services.product_mapping.feature_set import (
     FeatureSet,
     apply_normalizations,
     feature_from_text,
+    feature_set_from_extraction,
     features_from_attrs,
 )
 from app.services.product_mapping.primitives import (
     extract_bar_length_mm,
+    extract_diameter_length_mm,
     extract_dimensions_mm,
     extract_lot_quantity,
     extract_metal_profile,
@@ -43,15 +45,13 @@ from app.services.product_mapping.rules.base import (
     NormalizationSpec,
     apply_normalization_specs,
 )
-from app.services.product_mapping.rules.examples_vis_placo import (
-    VIS_PLACO_RULE_EXAMPLE,
-    extract_vis_placo,
-)
 from app.services.product_mapping.rules.ossature_placo import (
     NOMINAL_LENGTH_MAP,
     OSSATURE_PLACO_RULE,
 )
 from app.services.product_mapping.rules.plaque_platre import PLAQUE_PLATRE_RULE
+from app.services.product_mapping.rules.vis_placo import VIS_PLACO_RULE
+from app.services.product_mapping.vis_extractor import extract_vis_placo
 from app.services.product_mapping.service import ProductMappingService
 
 # --- Primitives -----------------------------------------------------------
@@ -69,6 +69,8 @@ def test_primitives_shared_by_both_categories():
     assert extract_metal_profile("montants M4835 NF") == "M48"
     assert extract_lot_quantity("Lot de 10 montants M4835") == 10
     assert extract_lot_quantity("Montant M48 seul") is None
+    assert extract_diameter_length_mm("Vis 3,5 x 25 mm") == (3.5, 25)
+    assert extract_diameter_length_mm("Rail R48 - 3 m NF") == (None, None)
 
 
 # --- CategoryRule / identité ---------------------------------------------
@@ -86,12 +88,11 @@ def test_identity_keys_declared_by_rule():
     assert PLAQUE_PLATRE_RULE.product_key("thickness_mm") == "thickness_mm"
 
 
-def test_rule_registry_exposes_both_categories():
-    assert registered_codes() == ("OSSATURE_PLACO", "PLAQUE_PLATRE")
+def test_rule_registry_exposes_every_category():
+    assert registered_codes() == ("OSSATURE_PLACO", "PLAQUE_PLATRE", "VIS_PLACO")
     assert get_rule("OSSATURE_PLACO") is OSSATURE_PLACO_RULE
     assert get_rule("PLAQUE_PLATRE") is PLAQUE_PLATRE_RULE
-    # L'exemple documentaire n'est PAS enregistré — aucun run réel ne l'utilise
-    assert "VIS_PLACO" not in registered_codes()
+    assert get_rule("VIS_PLACO") is VIS_PLACO_RULE
 
 
 def test_identity_complete_requires_every_key():
@@ -382,29 +383,41 @@ def test_pipeline_is_exact_applicable_refuses_unknown_identity():
     )
 
 
-# --- Exemple documentaire VIS_PLACO --------------------------------------
+# --- VIS_PLACO : famille ajoutée en configuration seule ------------------
 
-def test_vis_placo_example_is_configuration_only():
-    """Ajouter une famille = une CategoryRule, sans toucher matcher ni pipeline."""
-    rule = VIS_PLACO_RULE_EXAMPLE
-    assert rule.identity_keys == ("kind", "head", "nominal_diameter_tenths")
-    assert rule.product_key("nominal_diameter_tenths") == "diameter_tenths"
+def test_vis_placo_added_without_dedicated_matcher_or_pipeline():
+    """Ajouter une famille = une CategoryRule + un extracteur de primitives."""
+    rule = VIS_PLACO_RULE
+    assert rule.identity_keys == ("type", "diameter_mm", "length_mm")
+    assert rule.product_key("diameter_mm") == "diameter_mm"
+    # Aucune table de correspondance : les diamètres fournisseur sont déjà nominaux
+    assert rule.normalizations == ()
 
-    fs = extract_vis_placo("Vis placo autoperforante - Lot de 500")
+    extraction = extract_vis_placo(
+        "Seau de 1000 vis plaque de plâtre tête trompette Philips 3,5 x 25 mm"
+    )
+    assert extraction.classified is True
+    assert extraction.attributes["diameter_mm"] == 3.5
+    assert extraction.attributes["length_mm"] == 25
+    assert extraction.attributes["packaging_qty"] == 1000
+
+    # Le pipeline générique adapte l'extraction sans code dédié à la catégorie
+    fs = feature_set_from_extraction(extraction, norms=rule.normalizations)
     assert isinstance(fs, FeatureSet)
-    assert fs.classified is True
-    assert fs.as_attrs()["lot_quantity"] == 500
-    assert fs.as_attrs()["head"] is None  # UNKNOWN, pas une valeur inventée
+    assert fs.as_attrs()["type"] == "placo"
 
-    # La normalisation déclarative fonctionne sans code dédié à la catégorie
-    attrs = apply_normalization_specs({"diameter_tenths": 4}, rule.normalizations)
-    assert attrs["diameter_tenths"] == 4
-    assert attrs["nominal_diameter_tenths"] == 35
-
-    # Et le matcher générique la consomme telle quelle
+    # Et le matcher générique consomme l'identité telle quelle
     m = generic_matcher.best_match(
         rule,
-        {"kind": "VIS", "head": "TF", "nominal_diameter_tenths": 35},
-        [(1, "PMC-VIS-TF-35", {"kind": "VIS", "head": "TF", "diameter_tenths": 35}, None)],
+        fs.as_attrs(),
+        [
+            (
+                1,
+                "PMC-VIS-PLACO-35X25",
+                {"type": "placo", "diameter_mm": 3.5, "length_mm": 25},
+                "Vis placo",
+            )
+        ],
     )
     assert m.status == PROPOSAL_EXACT
+    assert m.algorithm_version == "vis_match.v1"

@@ -49,6 +49,7 @@ from app.services.product_mapping.plaque_extractor import (
     diagnose_attribute_gaps,
     extract_plaque_platre,
 )
+from app.services.product_mapping.rules import get_rule
 from app.services.product_mapping.rules.ossature_placo import (
     OSSATURE_ATTR_DEFS,
     OSSATURE_PLACO_RULE,
@@ -358,6 +359,14 @@ def _example(item, *, status: str, reason: str, score: float | None) -> MappingE
 class ProductMappingService:
     def __init__(self, session: Session):
         self.session = session
+
+    # ------------------------------------------------------------------
+    # Catégorie générique (V2) — délégation stricte au pipeline
+    # ------------------------------------------------------------------
+
+    def run_category_code(self, code: str, **kwargs: Any) -> CategoryRunResult:
+        """Analyse dry-run d'une catégorie enregistrée, sans projection métier."""
+        return pipeline.run_category(self.session, get_rule(code), **kwargs)
 
     # ------------------------------------------------------------------
     # PLAQUE_PLATRE
