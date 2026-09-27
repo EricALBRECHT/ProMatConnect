@@ -194,3 +194,24 @@ from app.models.supplier_live_cache import (  # noqa: E402
 from app.models.supplier_live_cache import (  # noqa: E402
     SupplierStoreCache as SupplierStoreCache,
 )
+from app.models.supplier_catalog_sync import (  # noqa: E402
+    SupplierCatalogSyncError as SupplierCatalogSyncError,
+)
+from app.models.supplier_catalog_sync import (  # noqa: E402
+    SupplierCatalogSyncItem as SupplierCatalogSyncItem,
+)
+from app.models.supplier_catalog_sync import (  # noqa: E402
+    SupplierCatalogSyncJob as SupplierCatalogSyncJob,
+)
+from app.models.product_mapping import (  # noqa: E402
+    ProductAttributeDef as ProductAttributeDef,
+)
+from app.models.product_mapping import (  # noqa: E402
+    ProductCategory as ProductCategory,
+)
+from app.models.product_mapping import (  # noqa: E402
+    ProductMappingProposal as ProductMappingProposal,
+)
+from app.models.product_mapping import (  # noqa: E402
+    SupplierProductFeature as SupplierProductFeature,
+)
