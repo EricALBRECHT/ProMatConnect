@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Mapping produit ProMatConnect — analyse / apply EXACT PLAQUE_PLATRE V1.5.
+"""Mapping produit ProMatConnect — PLAQUE_PLATRE / OSSATURE_PLACO.
 
 Par défaut : analyse dry-run, AUCUNE écriture de SupplierProduct.product_id.
 
 Exemples :
   python tools/product_mapping.py --supplier BRICO_DEPOT --category PLAQUE_PLATRE --all
-  python tools/product_mapping.py --supplier BRICO_DEPOT --category PLAQUE_PLATRE --all --diagnose
+  python tools/product_mapping.py --supplier BRICO_DEPOT --category OSSATURE_PLACO --all
   python tools/product_mapping.py --supplier BRICO_DEPOT --category PLAQUE_PLATRE --all --apply-exact
 """
 
@@ -24,19 +24,26 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.database import make_engine
-from app.models.product_mapping import CATEGORY_PLAQUE_PLATRE
+from app.models.product_mapping import (
+    CATEGORY_OSSATURE_PLACO,
+    CATEGORY_PLAQUE_PLATRE,
+)
 from app.services.product_mapping import ProductMappingService
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--supplier", default="BRICO_DEPOT")
-    p.add_argument("--category", default=CATEGORY_PLAQUE_PLATRE)
+    p.add_argument(
+        "--category",
+        default=CATEGORY_PLAQUE_PLATRE,
+        choices=(CATEGORY_PLAQUE_PLATRE, CATEGORY_OSSATURE_PLACO),
+    )
     p.add_argument(
         "--limit",
         type=int,
         default=50,
-        help="Max vraies plaques analysées (ignoré si --all).",
+        help="Max éléments classifiés (ignoré si --all).",
     )
     p.add_argument(
         "--all",
@@ -48,21 +55,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--persist",
         action="store_true",
-        help="Persister features/proposals (jamais product_id).",
+        help="Persister features/proposals (jamais product_id). PLAQUE uniquement.",
     )
     p.add_argument(
         "--apply-exact",
         action="store_true",
         help=(
-            "Appliquer les mappings EXACT éligibles "
-            "(product_id + correction_source=exact_rule). "
+            "Appliquer les mappings EXACT (PLAQUE_PLATRE uniquement en V1). "
             "Sans cette option : aucune écriture product_id."
         ),
     )
     p.add_argument(
         "--diagnose",
         action="store_true",
-        help="Lister REVIEW/INSUFFICIENT/NO_PMC avec raisons explicites.",
+        help="Lister REVIEW/INSUFFICIENT/NO_PMC (PLAQUE_PLATRE).",
     )
     p.add_argument(
         "--example-limit",
@@ -73,9 +79,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _print_report(result) -> None:
+def _print_plaque_report(result) -> None:
     d = result.to_dict()
-    print("=== Mapping PLAQUE_PLATRE (V1.5) ===")
+    print("=== Mapping PLAQUE_PLATRE ===")
     print(f"1. SupplierProduct total        : {d['supplier_product_total']}")
     print(f"2. Candidats initiaux (SQL)     : {d['initial_candidates']}")
     print(f"3. NOT_THIS_CATEGORY            : {d['not_this_category']}")
@@ -87,37 +93,64 @@ def _print_report(result) -> None:
     print(f"9. NO_PMC_PRODUCT               : {d['no_pmc_product']}")
     print(f"10. INSUFFICIENT_DATA           : {d['insufficient_data']}")
     print(f"11. AMBIGUOUS                   : {d['ambiguous']}")
-    print()
     apps = d.get("exact_applications") or []
-    print(f"--- Exact applicables (product_id NULL) : {len(apps)} ---")
+    print(f"\n--- Exact applicables : {len(apps)} ---")
     for a in apps:
         print(
             f"  SP {a['supplier_product_id']} | {a['supplier_reference']} | "
-            f"{a['product_code']} | {a['designation'][:80]}"
+            f"{a['product_code']}"
         )
     print()
-    print("--- Variantes / dimensions ---")
-    variants = d["variants"]
-    print(f"par type        : {variants['by_type']}")
-    print(f"par épaisseur   : {variants['by_thickness_mm']}")
-    print(f"par longueur    : {variants['by_length_mm']}")
-    print(f"par largeur     : {variants['by_width_mm']}")
-    print(f"combinaisons    : {variants['by_dims']}")
-    print(f"variantes       : {variants['by_variant']}")
-    print(f"flags           : {variants['flags']}")
-    if variants["other_types"]:
-        print(f"autres types    : {variants['other_types']}")
+    print("--- JSON ---")
+    print(json.dumps(d, ensure_ascii=False, indent=2))
+
+
+def _print_ossature_report(result) -> None:
+    d = result.to_dict()
+    print("=== Mapping OSSATURE_PLACO (V1 dry-run) ===")
+    print(f"1. SupplierProduct total        : {d['supplier_product_total']}")
+    print(f"2. Candidats initiaux (SQL)     : {d['initial_candidates']}")
+    print(f"3. NOT_THIS_CATEGORY            : {d['not_this_category']}")
+    print(f"4. Vrais éléments               : {d['true_elements']}")
+    print(f"   RAIL                         : {d['rails']}")
+    print(f"   MONTANT                      : {d['montants']}")
+    print(f"   FOURRURE                     : {d['fourrures']}")
+    print(f"5. ALREADY_MAPPED               : {d['already_mapped']}")
+    print(f"6. EXACT                        : {d['exact']}")
+    print(f"7. NO_PMC_PRODUCT               : {d['no_pmc_product']}")
+    print(f"8. INSUFFICIENT_DATA            : {d['insufficient_data']}")
+    print(f"9. AMBIGUOUS                    : {d['ambiguous']}")
+    print(f"10. REVIEW                      : {d['review']}")
     print()
-    print("--- Product PMC manquants (NO_PMC_PRODUCT) ---")
+    print("--- NO_PMC_PRODUCT par variante ---")
     missing = d["missing_pmc_by_variant"]
     if not missing:
         print("(aucun)")
     else:
         for label, n in missing.items():
-            print(f"  {label} : {n} références fournisseur")
+            print(f"  {label} : {n}")
     print()
-    print(f"category_path disponible : {d['category_path_available']}")
-    print(f"note : {d['category_path_note']}")
+    print("--- Longueurs proches (réel → nominal) ---")
+    for c in d["near_length_cases"]:
+        print(
+            f"  SP {c['id']} | {c['supplier_reference']} | mapped={c.get('product_id')} "
+            f"| {c['kind']} {c['profile']} réel={c['length_mm']} "
+            f"nominal={c.get('nominal_length_mm')} | {c['pair']}"
+        )
+        print(f"    {c['designation']}")
+    print()
+    print("--- INSUFFICIENT_DATA ---")
+    for c in d.get("insufficient_cases") or []:
+        print(
+            f"  SP {c['id']} | {c['supplier_reference']} | missing={c['missing']} "
+            f"| {c['group']} | {c.get('hint')}"
+        )
+        print(f"    kind={c['kind']} profile={c['profile']} L={c['length_mm']}")
+        print(f"    {c['designation']}")
+    print()
+    print("--- Faux positifs (échantillons) ---")
+    for s in d["false_positive_samples"][:12]:
+        print(f"  - {s}")
     print()
     print("--- Exemples ---")
     for ex in result.examples[:10]:
@@ -127,65 +160,25 @@ def _print_report(result) -> None:
         print(f"extracted: {ex.extracted}")
         print(f"candidate: {ex.candidate_code}")
         print(f"status: {ex.status}  reason: {ex.reason}")
-        print(f"score: {ex.score}  existing_product_id: {ex.existing_product_id}")
     print()
     print("--- JSON ---")
     print(json.dumps(d, ensure_ascii=False, indent=2))
 
 
-def _print_diagnose(diag: dict) -> None:
-    print("=== Diagnostic PLAQUE_PLATRE (non-EXACT) ===")
-    print(f"population: {diag['population']}")
-    print(f"gap_counts: {diag['gap_counts']}")
-    for c in diag["cases"]:
-        print("\n---")
-        print(f"id={c['id']} ref={c['supplier_reference']}")
-        print(f"designation: {c['designation']}")
-        print(
-            f"extracted: type={c['type']} {c['length_mm']}×{c['width_mm']}×{c['thickness_mm']} "
-            f"hydro={c['hydrofuge']} feu={c['fire_resistant']} acou={c['acoustic']}"
-        )
-        print(f"reason={c['match_reason']} status={c['match_status']} candidate={c['candidate']}")
-        print(f"gaps: {c['gaps']}")
-        if c["pmc_same_dims"]:
-            print(f"pmc_same_dims: {[p['code'] for p in c['pmc_same_dims']]}")
-    print()
-    print("--- JSON ---")
-    print(json.dumps(diag, ensure_ascii=False, indent=2))
-
-
 def _print_apply(result) -> None:
     d = result.to_dict()
-    print("=== Apply EXACT PLAQUE_PLATRE (V1.5) ===")
-    print(f"dry_run            : {d['dry_run']}")
-    print(f"analysed           : {d['analysed']}")
-    print(f"already_mapped     : {d['already_mapped']}")
-    print(f"exact_candidates   : {d['exact_candidates']}")
-    print(f"applied            : {d['applied']}")
-    print(f"skipped            : {d['skipped']}")
-    print(f"errors             : {d['errors']}")
-    print()
-    print("--- Mappings ---")
-    for a in d["applications"]:
-        print(
-            f"  SP {a['supplier_product_id']} | {a['supplier_reference']} | "
-            f"{a['product_code']} | {a['designation'][:80]}"
-        )
-    if d["error_messages"]:
-        print("--- Errors ---")
-        for msg in d["error_messages"]:
-            print(f"  {msg}")
-    print()
-    print("--- JSON ---")
+    print("=== Apply EXACT PLAQUE_PLATRE ===")
+    print(f"dry_run={d['dry_run']} analysed={d['analysed']} "
+          f"already_mapped={d['already_mapped']} exact_candidates={d['exact_candidates']} "
+          f"applied={d['applied']} skipped={d['skipped']} errors={d['errors']}")
     print(json.dumps(d, ensure_ascii=False, indent=2))
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if args.category != CATEGORY_PLAQUE_PLATRE:
+    if args.apply_exact and args.category != CATEGORY_PLAQUE_PLATRE:
         print(
-            f"V1.5 : seule la catégorie {CATEGORY_PLAQUE_PLATRE} est supportée "
-            f"(reçu {args.category}).",
+            "Refusé : --apply-exact n'est disponible que pour PLAQUE_PLATRE.",
             file=sys.stderr,
         )
         return 2
@@ -218,16 +211,19 @@ def main(argv: list[str] | None = None) -> int:
             ],
         )
         svc = ProductMappingService(session)
+
         if args.diagnose:
-            diag = svc.diagnose_unresolved(supplier_name=args.supplier)
-            _print_diagnose(diag)
+            if args.category != CATEGORY_PLAQUE_PLATRE:
+                print("Diagnose : PLAQUE_PLATRE uniquement.", file=sys.stderr)
+                return 2
+            print(json.dumps(svc.diagnose_unresolved(supplier_name=args.supplier),
+                             ensure_ascii=False, indent=2))
             return 0
 
         if args.apply_exact:
             try:
                 apply_result = svc.apply_exact_plaque_platre(
-                    supplier_name=args.supplier,
-                    dry_run=False,
+                    supplier_name=args.supplier, dry_run=False
                 )
                 session.commit()
             except Exception as exc:
@@ -235,6 +231,16 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ERREUR apply-exact (rollback) : {exc}", file=sys.stderr)
                 return 1
             _print_apply(apply_result)
+            return 0
+
+        if args.category == CATEGORY_OSSATURE_PLACO:
+            result = svc.run_ossature_placo(
+                supplier_name=args.supplier,
+                limit=None if args.all_candidates else args.limit,
+                all_candidates=args.all_candidates,
+                example_limit=min(args.example_limit, 10),
+            )
+            _print_ossature_report(result)
             return 0
 
         result = svc.run_plaque_platre(
@@ -247,8 +253,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.persist:
             session.commit()
-
-        _print_report(result)
+        _print_plaque_report(result)
     return 0
 
 

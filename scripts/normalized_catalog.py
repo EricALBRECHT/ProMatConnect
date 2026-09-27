@@ -227,6 +227,25 @@ NORMALIZED_PRODUCTS: list[tuple] = [
         {"profile": "M48", "length_mm": 3000},
         "Montant M48 3 m — distinct du ~2,50 m. Quantité = pièces.",
     ),
+    # V1.1 OSSATURE — variantes manquantes confirmées dry-run
+    (
+        "PMC-MONTANT-M70-2500",
+        "Montant M70 ~2,50 m",
+        "Ossature",
+        "Montants",
+        "pièce",
+        {"profile": "M70", "length_mm": 2500},
+        "Montant M70 ~2,50 m — distinct du M48. Quantité = pièces.",
+    ),
+    (
+        "PMC-FOURRURE-F45-5300",
+        "Fourrure F45 5,30 m",
+        "Ossature",
+        "Fourrures",
+        "pièce",
+        {"profile": "F45", "length_mm": 5300},
+        "Fourrure F45 5,30 m — distincte du 3 m. Quantité = pièces.",
+    ),
     (
         "PMC-FOURRURE-F45-3000",
         "Fourrure F45 3 m",

@@ -6,6 +6,7 @@ Les mappings manuels (product_id déjà posé) → ALREADY_MAPPED, non recalcul�
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -17,9 +18,14 @@ from sqlalchemy.orm import Session
 from app.models import Product, Supplier, SupplierProduct
 from app.models.product_mapping import (
     ALGORITHM_VERSION_PLAQUE_V1,
+    CATEGORY_OSSATURE_PLACO,
     CATEGORY_PLAQUE_PLATRE,
     CORRECTION_SOURCE_EXACT_RULE,
+    EXTRACTOR_VERSION_OSSATURE_V1,
     EXTRACTOR_VERSION_PLAQUE_V1,
+    KIND_FOURRURE,
+    KIND_MONTANT,
+    KIND_RAIL,
     PROPOSAL_EXACT,
     PROPOSAL_HIGH,
     PROPOSAL_REVIEW,
@@ -43,6 +49,8 @@ from app.services.product_mapping.plaque_extractor import (
     identity_attrs_sufficient,
 )
 from app.services.product_mapping.plaque_matcher import MatchResult, best_match
+from app.services.product_mapping import ossature_extractor as ox
+from app.services.product_mapping import ossature_matcher as om
 
 
 PLAQUE_ATTR_DEFS: list[dict[str, Any]] = [
@@ -902,3 +910,356 @@ class ProductMappingService:
                 algorithm_version=match.algorithm_version or ALGORITHM_VERSION_PLAQUE_V1,
             )
         )
+
+
+OSSATURE_ATTR_DEFS: list[dict[str, Any]] = [
+    {
+        "key": "kind",
+        "data_type": "enum",
+        "required": True,
+        "match_role": "identity",
+        "enum_values": [KIND_RAIL, KIND_MONTANT, KIND_FOURRURE],
+    },
+    {
+        "key": "profile",
+        "data_type": "enum",
+        "required": True,
+        "match_role": "identity",
+        "enum_values": ["R48", "R70", "R90", "R100", "M48", "M70", "M90", "F45"],
+    },
+    {
+        "key": "length_mm",
+        "data_type": "int",
+        "required": True,
+        "unit": "mm",
+        "match_role": "identity",
+    },
+]
+
+_SQL_OSSATURE_FILTERS = (
+    SupplierProduct.designation.ilike("%rail%"),
+    SupplierProduct.designation.ilike("%montant%"),
+    SupplierProduct.designation.ilike("%fourrure%"),
+    SupplierProduct.designation.ilike("%R48%"),
+    SupplierProduct.designation.ilike("%R70%"),
+    SupplierProduct.designation.ilike("%M48%"),
+    SupplierProduct.designation.ilike("%M70%"),
+    SupplierProduct.designation.ilike("%F45%"),
+    SupplierProduct.designation.ilike("%ossature%"),
+)
+
+
+@dataclass
+class OssatureRunResult:
+    supplier_product_total: int = 0
+    initial_candidates: int = 0
+    not_this_category: int = 0
+    true_elements: int = 0
+    rails: int = 0
+    montants: int = 0
+    fourrures: int = 0
+    already_mapped: int = 0
+    exact: int = 0
+    review: int = 0
+    no_pmc_product: int = 0
+    insufficient_data: int = 0
+    ambiguous: int = 0
+    analysed: int = 0
+    missing_pmc_by_variant: dict[str, int] = field(default_factory=dict)
+    near_length_cases: list[dict[str, Any]] = field(default_factory=list)
+    insufficient_cases: list[dict[str, Any]] = field(default_factory=list)
+    examples: list[MappingExample] = field(default_factory=list)
+    false_positive_samples: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "supplier_product_total": self.supplier_product_total,
+            "initial_candidates": self.initial_candidates,
+            "not_this_category": self.not_this_category,
+            "true_elements": self.true_elements,
+            "rails": self.rails,
+            "montants": self.montants,
+            "fourrures": self.fourrures,
+            "already_mapped": self.already_mapped,
+            "exact": self.exact,
+            "review": self.review,
+            "no_pmc_product": self.no_pmc_product,
+            "insufficient_data": self.insufficient_data,
+            "ambiguous": self.ambiguous,
+            "analysed": self.analysed,
+            "missing_pmc_by_variant": self.missing_pmc_by_variant,
+            "near_length_cases": self.near_length_cases,
+            "insufficient_cases": self.insufficient_cases,
+            "false_positive_samples": self.false_positive_samples,
+            "examples": [
+                {
+                    "supplier_reference": e.supplier_reference,
+                    "designation": e.designation,
+                    "extracted": e.extracted,
+                    "candidate": e.candidate_code,
+                    "status": e.status,
+                    "reason": e.reason,
+                    "score": e.score,
+                    "existing_product_id": e.existing_product_id,
+                }
+                for e in self.examples
+            ],
+        }
+
+
+def ensure_ossature_placo_category(session: Session) -> ProductCategory:
+    cat = session.scalar(
+        select(ProductCategory).where(ProductCategory.code == CATEGORY_OSSATURE_PLACO)
+    )
+    if cat is None:
+        cat = ProductCategory(
+            code=CATEGORY_OSSATURE_PLACO,
+            name="Ossature placo",
+            parent_id=None,
+            reference_unit_default="pièce",
+            schema_version="1",
+        )
+        session.add(cat)
+        session.flush()
+    existing_keys = {
+        d.key
+        for d in session.scalars(
+            select(ProductAttributeDef).where(ProductAttributeDef.category_id == cat.id)
+        ).all()
+    }
+    for spec in OSSATURE_ATTR_DEFS:
+        if spec["key"] in existing_keys:
+            continue
+        session.add(
+            ProductAttributeDef(
+                category_id=cat.id,
+                key=spec["key"],
+                data_type=spec["data_type"],
+                required=bool(spec.get("required")),
+                unit=spec.get("unit"),
+                enum_values=spec.get("enum_values"),
+                match_role=spec.get("match_role", "optional"),
+            )
+        )
+    session.flush()
+    return cat
+
+
+def load_ossature_pmc_candidates(
+    session: Session,
+) -> list[tuple[int, str, dict | None, str | None]]:
+    rows = session.scalars(
+        select(Product).where(
+            or_(
+                Product.code.like("PMC-RAIL-%"),
+                Product.code.like("PMC-MONTANT-%"),
+                Product.code.like("PMC-FOURRURE-%"),
+                Product.category == "Ossature",
+            ),
+            Product.is_active.is_(True),
+        )
+    ).all()
+    return [(p.id, p.code, p.attributes, p.subcategory) for p in rows]
+
+
+def sql_ossature_candidates(
+    session: Session,
+    supplier_ids: list[int],
+    *,
+    limit: int | None = None,
+) -> list[SupplierProduct]:
+    q = (
+        select(SupplierProduct)
+        .where(
+            SupplierProduct.supplier_id.in_(supplier_ids),
+            or_(*_SQL_OSSATURE_FILTERS),
+        )
+        .order_by(SupplierProduct.id)
+    )
+    if limit is not None:
+        q = q.limit(limit)
+    return list(session.scalars(q).all())
+
+
+def _ossature_variant_label(attrs: dict[str, Any]) -> str:
+    # Regroupement NO_PMC sur longueur nominale (identité matching)
+    ln = attrs.get("nominal_length_mm")
+    if ln is None:
+        ln = attrs.get("length_mm")
+    return (
+        f"{attrs.get('kind') or '?'} "
+        f"{attrs.get('profile') or '?'} "
+        f"{ln if ln is not None else '?'}"
+    )
+
+
+def _run_ossature_placo(
+    self: ProductMappingService,
+    *,
+    supplier_name: str = "BRICO_DEPOT",
+    limit: int | None = 50,
+    all_candidates: bool = False,
+    example_limit: int = 10,
+) -> OssatureRunResult:
+    """Analyse dry-run OSSATURE_PLACO — jamais d'écriture product_id."""
+    ensure_ossature_placo_category(self.session)
+    candidates = load_ossature_pmc_candidates(self.session)
+    result = OssatureRunResult()
+
+    supplier_ids = resolve_supplier_ids(self.session, supplier_name)
+    if not supplier_ids:
+        return result
+
+    result.supplier_product_total = int(
+        self.session.scalar(
+            select(func.count())
+            .select_from(SupplierProduct)
+            .where(SupplierProduct.supplier_id.in_(supplier_ids))
+        )
+        or 0
+    )
+
+    fetch_limit = None if all_candidates else max((limit or 50) * 20, 200)
+    sps = sql_ossature_candidates(self.session, supplier_ids, limit=fetch_limit)
+    result.initial_candidates = len(sps)
+    snapshot = {sp.id: sp.product_id for sp in sps}
+    missing_c: Counter[str] = Counter()
+
+    for sp in sps:
+        if not all_candidates and limit is not None and result.true_elements >= limit:
+            break
+
+        extraction = ox.extract_ossature_placo(designation=sp.designation or "")
+        result.analysed += 1
+
+        if not extraction.classified:
+            result.not_this_category += 1
+            if len(result.false_positive_samples) < 15:
+                result.false_positive_samples.append((sp.designation or "")[:120])
+            continue
+
+        result.true_elements += 1
+        attrs = extraction.attributes
+        kind = attrs.get("kind")
+        if kind == KIND_RAIL:
+            result.rails += 1
+        elif kind == KIND_MONTANT:
+            result.montants += 1
+        elif kind == KIND_FOURRURE:
+            result.fourrures += 1
+
+        length = attrs.get("length_mm")
+        # Rapport : longueurs réelles 2490/2990 (nominales 2500/3000)
+        if length in {2490, 2990}:
+            pair = "2490/2500" if length == 2490 else "2990/3000"
+            result.near_length_cases.append(
+                {
+                    "id": sp.id,
+                    "supplier_reference": sp.supplier_reference,
+                    "designation": sp.designation,
+                    "brand": sp.brand,
+                    "kind": kind,
+                    "profile": attrs.get("profile"),
+                    "length_mm": length,
+                    "nominal_length_mm": attrs.get("nominal_length_mm"),
+                    "pair": pair,
+                    "product_id": sp.product_id,
+                    "correction_source": sp.correction_source,
+                }
+            )
+
+        if sp.product_id is not None:
+            result.already_mapped += 1
+            if len(result.examples) < example_limit:
+                result.examples.append(
+                    MappingExample(
+                        supplier_reference=sp.supplier_reference,
+                        designation=(sp.designation or "")[:160],
+                        extracted=attrs,
+                        candidate_code=None,
+                        status="ALREADY_MAPPED",
+                        reason=ox.REASON_ALREADY_MAPPED,
+                        score=None,
+                        existing_product_id=sp.product_id,
+                    )
+                )
+            continue
+
+        match = om.best_match(attrs, candidates)
+        reason = match.reason or ""
+        if reason == ox.REASON_EXACT:
+            result.exact += 1
+        elif reason == ox.REASON_AMBIGUOUS:
+            result.ambiguous += 1
+        elif reason == ox.REASON_REVIEW:
+            result.review += 1
+        elif reason == ox.REASON_INSUFFICIENT_DATA:
+            result.insufficient_data += 1
+            missing = []
+            if attrs.get("kind") is None:
+                missing.append("kind")
+            if attrs.get("profile") is None:
+                missing.append("profile")
+            if attrs.get("length_mm") is None:
+                missing.append("length_mm")
+            if attrs.get("nominal_length_mm") is None:
+                missing.append("nominal_length_mm")
+            # Heuristique A/B : indices profil dans designation sans extraction
+            des = sp.designation or ""
+            group = "B_INFORMATION_REELLEMENT_ABSENTE"
+            hint = None
+            if "profile" in missing:
+                if re.search(r"R\s*\d{2}\d{2}|F\s*\d{2}\d{2}|M\s*\d{2}\d{2}", des, re.I):
+                    group = "A_INFORMATION_PRESENTE_MAIS_NON_EXTRAITE"
+                    hint = "code compact type R4830/F4518/M4835"
+                elif re.search(r"\b45\s*mm\b|\b48\s*mm\b|\b70\s*mm\b", des, re.I):
+                    group = "A_INFORMATION_PRESENTE_MAIS_NON_EXTRAITE"
+                    hint = "largeur mm sans lettre de profil (R/M/F)"
+            result.insufficient_cases.append(
+                {
+                    "id": sp.id,
+                    "supplier_reference": sp.supplier_reference,
+                    "designation": des,
+                    "kind": attrs.get("kind"),
+                    "profile": attrs.get("profile"),
+                    "length_mm": attrs.get("length_mm"),
+                    "nominal_length_mm": attrs.get("nominal_length_mm"),
+                    "missing": missing,
+                    "group": group,
+                    "hint": hint,
+                }
+            )
+        elif reason == ox.REASON_NO_PMC_PRODUCT:
+            result.no_pmc_product += 1
+            missing_c[_ossature_variant_label(attrs)] += 1
+        else:
+            result.no_pmc_product += 1
+            missing_c[_ossature_variant_label(attrs)] += 1
+            reason = ox.REASON_NO_PMC_PRODUCT
+
+        if len(result.examples) < example_limit:
+            result.examples.append(
+                MappingExample(
+                    supplier_reference=sp.supplier_reference,
+                    designation=(sp.designation or "")[:160],
+                    extracted=attrs,
+                    candidate_code=match.product_code,
+                    status=match.status.upper(),
+                    reason=reason,
+                    score=float(match.score) if match.score is not None else None,
+                    existing_product_id=sp.product_id,
+                )
+            )
+
+    result.missing_pmc_by_variant = dict(missing_c.most_common())
+
+    for sp_id, old_pid in snapshot.items():
+        sp = self.session.get(SupplierProduct, sp_id)
+        if sp is not None and sp.product_id != old_pid:
+            raise RuntimeError(
+                "Analyse OSSATURE dry-run ne doit jamais modifier product_id"
+            )
+    return result
+
+
+ProductMappingService.run_ossature_placo = _run_ossature_placo  # type: ignore[attr-defined]
