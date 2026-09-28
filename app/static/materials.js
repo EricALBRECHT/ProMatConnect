@@ -10,6 +10,10 @@ window.ProMatMaterials = (() => {
     return element;
   }
 
+  /** Plafond API : ne jamais demander le catalogue entier. */
+  const PRODUCT_PAGE_LIMIT = 100;
+  const SEARCH_DEBOUNCE_MS = 250;
+
   function filterProducts(products, query) {
     const needle = query.trim().toLocaleLowerCase("fr");
     if (!needle) return products.slice();
@@ -20,27 +24,35 @@ window.ProMatMaterials = (() => {
     );
   }
 
-  function fillProductSelect(select, products, query = "") {
-    const filtered = filterProducts(products, query);
+  function fillProductSelect(select, products) {
+    const list = Array.isArray(products) ? products : [];
     select.replaceChildren(
-      ...filtered.map((product) => {
+      ...list.map((product) => {
         const option = node(
           "option",
           `${product.name} · ${product.reference_unit}`,
         );
-        option.value = product.id;
+        option.value = String(product.id);
         return option;
       }),
     );
-    if (!filtered.length) {
+    if (!list.length) {
       const option = node("option", "Aucun matériau trouvé");
       option.value = "";
       select.append(option);
     }
   }
 
-  async function fetchProducts() {
-    const response = await fetch("/api/products");
+  function productSearchUrl(query) {
+    const params = new URLSearchParams();
+    params.set("limit", String(PRODUCT_PAGE_LIMIT));
+    const q = String(query || "").trim();
+    if (q) params.set("q", q);
+    return `/api/products?${params}`;
+  }
+
+  async function fetchProducts(query = "", { signal } = {}) {
+    const response = await fetch(productSearchUrl(query), { signal });
     if (!response.ok) {
       throw new Error(
         "Catalogue indisponible. Rechargez la page pour réessayer.",
@@ -150,8 +162,67 @@ window.ProMatMaterials = (() => {
 
     if (quantityInput) configureQuantityInput(quantityInput);
 
+    let searchTimer = 0;
+    let searchGeneration = 0;
+    let searchAbort = null;
+
+    function rememberProducts(found) {
+      const current = getProducts();
+      const known = new Set(current.map((item) => item.id));
+      for (const product of found || []) {
+        if (!product || known.has(product.id)) continue;
+        current.push(product);
+        known.add(product.id);
+      }
+    }
+
+    function showChoices(list) {
+      fillProductSelect(productSelect, list);
+    }
+
+    function showDefaultPage() {
+      showChoices(getProducts().slice(0, PRODUCT_PAGE_LIMIT));
+    }
+
+    function showSearching() {
+      const waiting = node("option", "Recherche…");
+      waiting.value = "";
+      productSelect.replaceChildren(waiting);
+    }
+
+    async function searchOnServer(query) {
+      const generation = ++searchGeneration;
+      if (searchAbort) searchAbort.abort();
+      const controller = new AbortController();
+      searchAbort = controller;
+      try {
+        const found = await fetchProducts(query, { signal: controller.signal });
+        if (generation !== searchGeneration) return;
+        if (search.value.trim() !== query) return;
+        rememberProducts(found);
+        showChoices(found.slice(0, PRODUCT_PAGE_LIMIT));
+      } catch (error) {
+        if (error && error.name === "AbortError") return;
+        if (generation !== searchGeneration) return;
+        if (status) status(error.message || "Catalogue indisponible.", true);
+      }
+    }
+
     function renderProducts() {
-      fillProductSelect(productSelect, getProducts(), search.value);
+      const query = search.value.trim();
+      window.clearTimeout(searchTimer);
+      if (!query) {
+        searchGeneration += 1;
+        if (searchAbort) searchAbort.abort();
+        showDefaultPage();
+        return;
+      }
+      const local = filterProducts(getProducts(), query).slice(0, PRODUCT_PAGE_LIMIT);
+      if (local.length) showChoices(local);
+      else showSearching();
+      searchTimer = window.setTimeout(() => {
+        searchOnServer(query);
+      }, SEARCH_DEBOUNCE_MS);
     }
 
     function renderLines() {

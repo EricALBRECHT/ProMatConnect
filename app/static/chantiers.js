@@ -286,6 +286,22 @@ async function setupDetail(chantierId) {
     status();
   }
 
+  function rememberChantierMaterials(materiaux) {
+    const known = new Set(products.map((item) => item.id));
+    for (const line of materiaux || []) {
+      if (known.has(line.product_id)) continue;
+      products.push({
+        id: line.product_id,
+        code: line.product_code,
+        name: line.product_name,
+        category: line.product_category,
+        reference_unit: line.unite,
+        description: null,
+      });
+      known.add(line.product_id);
+    }
+  }
+
   const materialList = bindMaterialLines({
     getProducts: () => products,
     getLines: () => lines,
@@ -584,6 +600,7 @@ async function setupDetail(chantierId) {
         product_id: line.product_id,
         quantity: String(line.quantite),
       }));
+      rememberChantierMaterials(payload.materiaux);
       materialList.renderLines();
       dirty = false;
       showIdentityCompact();
@@ -795,6 +812,7 @@ async function setupDetail(chantierId) {
       product_id: line.product_id,
       quantity: String(line.quantite),
     }));
+    rememberChantierMaterials(chantier.materiaux);
     materialList.renderProducts();
     materialList.renderLines();
     dirty = false;
