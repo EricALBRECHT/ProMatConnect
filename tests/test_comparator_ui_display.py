@@ -106,6 +106,7 @@ def test_app_js_ui_contracts():
     assert "formatAgencyAddressLines" in app_js
     assert "formatSupplierDisplayName" in app_js
     assert "filterOptionsForDisplay" in app_js
+    assert "Au plus une option par enseigne Brico" in app_js
     assert "Prix simulés" not in app_js
     assert "Données de comparaison · offres live disponibles" in app_js
     assert "Comparaison des offres en cours…" in app_js

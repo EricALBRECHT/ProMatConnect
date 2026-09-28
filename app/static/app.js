@@ -593,15 +593,41 @@ function filterOptionsForDisplay(options) {
   const list = Array.isArray(options) ? options : [];
   const brandOf = (option) =>
     String(option.title || "").replace(/^Tout chez\s+/i, "").trim();
-  const hasValidBrico = list.some(
-    (option) => option.valid && isBricoBrandName(brandOf(option)),
-  );
-  if (!hasValidBrico) return list;
-  // Masque la ligne historique vide (ex. BRICO_DEPOT file) si une source live
-  // équivalente est déjà complète — sans fusionner les connecteurs.
-  return list.filter(
-    (option) => !(!option.valid && isBricoBrandName(brandOf(option))),
-  );
+  // Au plus une option par enseigne Brico (file BRICO_DEPOT + live BRICO DEPOT
+  // se normalisent tous deux en « Brico Dépôt » à l'affichage).
+  const bricoIndexes = [];
+  list.forEach((option, index) => {
+    if (isBricoBrandName(brandOf(option))) bricoIndexes.push(index);
+  });
+  if (bricoIndexes.length <= 1) return list;
+
+  const preferIndex = (() => {
+    const validLive = bricoIndexes.find((i) => {
+      const option = list[i];
+      if (!option.valid) return false;
+      return (option.available || []).some((line) => isLiveAgencyKey(line.agency_key));
+    });
+    if (validLive !== undefined) return validLive;
+    const anyValid = bricoIndexes.find((i) => list[i].valid);
+    if (anyValid !== undefined) return anyValid;
+    const anyLive = bricoIndexes.find((i) =>
+      (list[i].available || [])
+        .concat(list[i].unavailable || [])
+        .some((line) => isLiveAgencyKey(line.agency_key)),
+    );
+    if (anyLive !== undefined) return anyLive;
+    // Live connector title uses "BRICO DEPOT" (space); prefer that over underscore.
+    const spaced = bricoIndexes.find((i) => {
+      const raw = brandOf(list[i]).replaceAll("_", " ").trim();
+      return raw === brandOf(list[i]);
+    });
+    return spaced !== undefined ? spaced : bricoIndexes[0];
+  })();
+
+  return list.filter((_, index) => {
+    if (!bricoIndexes.includes(index)) return true;
+    return index === preferIndex;
+  });
 }
 
 function stripSupplierHtml(raw) {

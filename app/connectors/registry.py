@@ -3,7 +3,10 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.connectors.base import SupplierConnector
-from app.connectors.bricodepot.connector import BricoDepotConnector
+from app.connectors.bricodepot.connector import (
+    BricoDepotConnector,
+    is_brico_supplier_name,
+)
 from app.connectors.demo import DemoSupplierConnector
 from app.models import Offer, Supplier
 from app.repositories.offers import OfferRepository
@@ -27,6 +30,11 @@ def _source_type_for(session: Session, supplier_id: int, fallback: str) -> str:
     if "demo" in types:
         return "demo"
     return fallback
+
+
+def is_demo_test_supplier_name(name: str | None) -> bool:
+    """Fournisseurs de démonstration seedés (suffixe « TEST » — convention seed)."""
+    return str(name or "").rstrip().endswith(" TEST")
 
 
 def build_connectors(session: Session) -> list[SupplierConnector]:
@@ -80,3 +88,35 @@ def build_live_connectors(
         )
     )
     return connectors
+
+
+def build_comparison_connectors(
+    session: Session,
+    *,
+    resolved_origin: ResolvedOrigin | None,
+    settings: Settings,
+    brico_client=None,
+) -> list[SupplierConnector]:
+    """Connecteurs pour /compare : catalogue + live, sans doublon d'enseigne.
+
+    - Si Brico LIVE est actif : on n'expose pas le connecteur file ``BRICO_DEPOT``
+      (même enseigne, autre identité technique) — un seul « Tout chez Brico Dépôt ».
+    - Si au moins un connecteur live est présent : on masque les fournisseurs
+      seedés « … TEST » (POINT.P TEST, GEDIMAT TEST) pour ne pas polluer une
+      comparaison live. Les données seed restent en base.
+    """
+    live = build_live_connectors(
+        session,
+        resolved_origin=resolved_origin,
+        settings=settings,
+        brico_client=brico_client,
+    )
+    catalog = build_connectors(session)
+    if live:
+        catalog = [
+            c
+            for c in catalog
+            if not is_brico_supplier_name(c.supplier_name)
+            and not is_demo_test_supplier_name(c.supplier_name)
+        ]
+    return [*catalog, *live]

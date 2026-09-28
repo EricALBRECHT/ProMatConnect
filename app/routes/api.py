@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.connectors.file_csv import MAX_UPLOAD_BYTES
-from app.connectors.registry import build_connectors, build_live_connectors
+from app.connectors.registry import build_comparison_connectors
 from app.repositories.catalog import CatalogRepository
 from app.schemas.catalog import ProductCreate, ProductRead
 from app.schemas.comparison import CompareRequest, ComparisonResponse
@@ -218,10 +218,9 @@ def compare(
     settings = request.app.state.settings
     try:
         origin = OriginService(settings, geocoder).resolve(payload.origin)
-        connectors = [
-            *build_connectors(session),
-            *build_live_connectors(session, resolved_origin=origin, settings=settings),
-        ]
+        connectors = build_comparison_connectors(
+            session, resolved_origin=origin, settings=settings
+        )
         return ComparisonService(
             connectors,
             origin.latitude,
