@@ -27,6 +27,10 @@ from app.services.product_mapping.rules.vis_bois import VIS_BOIS_RULE
 from app.services.product_mapping.rules.vis_multi import VIS_MULTI_RULE
 from app.services.product_mapping.rules.vis_placo import VIS_PLACO_RULE
 
+# Familles mass (DIMENSIONAL_FASTENER / BOARD_PANEL) — side-effect register_rule
+from app.services.product_mapping import mass_dimensional as _mass_dimensional  # noqa: F401
+from app.services.product_mapping import mass_panels as _mass_panels  # noqa: F401
+
 __all__ = [
     "BOARD_PANEL",
     "CHEVILLE_METAL_RULE",

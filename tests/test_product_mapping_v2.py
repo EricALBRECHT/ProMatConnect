@@ -97,18 +97,28 @@ def test_identity_keys_declared_by_rule():
 
 def test_rule_registry_exposes_every_category():
     assert registered_codes() == (
+        "BOULON",
         "CHEVILLE_METAL",
+        "CHEVILLE_NYLON",
         "CORNIERE_PVC",
         "FER_BETON",
+        "GOUJON",
         "OSSATURE_PLACO",
+        "PANNEAU_AGGLO",
+        "PANNEAU_CP",
         "PANNEAU_MDF",
+        "PANNEAU_OSB",
         "PLAQUE_PLATRE",
         "ROND_ACIER",
+        "TIREFOND",
         "TUBE_ROND_ACIER",
         "VIS_AGGLO",
+        "VIS_BETON",
         "VIS_BOIS",
         "VIS_MULTI",
         "VIS_PLACO",
+        "VIS_TERRASSE",
+        "VIS_TOLE",
     )
     assert get_rule("OSSATURE_PLACO") is OSSATURE_PLACO_RULE
     assert get_rule("PLAQUE_PLATRE") is PLAQUE_PLATRE_RULE

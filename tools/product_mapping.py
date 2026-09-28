@@ -336,6 +336,7 @@ CATALOG_BATCH_DISCOVER_COMMAND = "catalog-batch-discover"
 CATALOG_BATCH_CONSOLIDATE_COMMAND = "catalog-batch-consolidate"
 FASTENER_BATCH_COMMAND = "fastener-batch"
 PROFILES_BATCH_COMMAND = "profiles-batch"
+MASS_BATCH_COMMAND = "mass-batch"
 
 FASTENER_BATCH_CATEGORIES = (
     CATEGORY_VIS_BOIS,
@@ -726,6 +727,39 @@ def main_profiles_batch(argv: list[str]) -> int:
     return 0
 
 
+def main_mass_batch(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(
+        prog=f"product_mapping.py {MASS_BATCH_COMMAND}",
+        description="Passe mass mapping BRICO_DEPOT (DIMENSIONAL + BOARD + re-apply).",
+    )
+    p.add_argument("--apply", action="store_true", default=True)
+    p.add_argument("--no-apply", action="store_false", dest="apply")
+    p.add_argument("--format", default="json", choices=("text", "json"))
+    args = p.parse_args(argv)
+    settings = Settings()
+    engine = make_engine(settings.database_url)
+    from app.services.product_mapping.mass_batch import run_mass_pass
+
+    with Session(engine) as session:
+        report = run_mass_pass(session, apply=args.apply)
+    if args.format == "json":
+        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    else:
+        print(
+            f"mapped {report['mapped_before']} → {report['mapped_after']} "
+            f"(+{report['mapped_after'] - report['mapped_before']})"
+        )
+        for fam in report["families"]:
+            ap = fam.get("apply") or {}
+            seed = fam.get("seed") or {}
+            print(
+                f"{fam['category']}: seed={seed.get('created', '-')} "
+                f"exact={fam.get('dry_run', {}).get('exact')} "
+                f"applied={ap.get('applied', '-')}"
+            )
+    return 0
+
+
 def _print_apply(result) -> None:
     d = result.to_dict()
     print("=== Apply EXACT PLAQUE_PLATRE ===")
@@ -748,6 +782,8 @@ def main(argv: list[str] | None = None) -> int:
         return main_fastener_batch(raw[1:])
     if raw and raw[0] == PROFILES_BATCH_COMMAND:
         return main_profiles_batch(raw[1:])
+    if raw and raw[0] == MASS_BATCH_COMMAND:
+        return main_mass_batch(raw[1:])
 
     args = parse_args(argv)
     if args.apply_exact and args.category != CATEGORY_PLAQUE_PLATRE:
