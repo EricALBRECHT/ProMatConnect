@@ -1,8 +1,7 @@
-"""CategoryRule OSSATURE_PLACO — identité kind + profile + longueur nominale.
+"""CategoryRule OSSATURE_PLACO — IdentityModel LINEAR_PROFILE.
 
 La longueur fournisseur (length_mm) n'est jamais modifiée. Le matching utilise
-nominal_length_mm, produit par une table de correspondance EXPLICITE — surtout
-pas une tolérance ± ni un arrondi générique.
+nominal_length_mm via la table explicite du modèle (2490→2500, 2990→3000).
 """
 
 from __future__ import annotations
@@ -17,29 +16,15 @@ from app.models.product_mapping import (
     KIND_MONTANT,
     KIND_RAIL,
 )
-from app.services.product_mapping.rules.base import (
-    PARTIAL_HIERARCHY,
-    CategoryRule,
-    NormalizationSpec,
-    register_rule,
+from app.services.product_mapping.identity_models import (
+    LINEAR_PROFILE,
+    NOMINAL_LENGTH_MAP,
+    NOMINAL_LENGTH_SPEC,
 )
+from app.services.product_mapping.rules.base import CategoryRule, register_rule
 
-# Longueurs commerciales nominales — table explicite (PAS une tolérance ±).
-# length_mm fournisseur → nominal_length_mm pour matching PMC.
-NOMINAL_LENGTH_MAP: dict[int, int] = {
-    2490: 2500,
-    2500: 2500,
-    2990: 3000,
-    3000: 3000,
-}
-
-NOMINAL_LENGTH_SPEC = NormalizationSpec(
-    source_key="length_mm",
-    target_key="nominal_length_mm",
-    mapping=NOMINAL_LENGTH_MAP,
-)
-
-IDENTITY_KEYS = ("kind", "profile", "nominal_length_mm")
+# Compat imports historiques (tests / extracteur).
+IDENTITY_KEYS = LINEAR_PROFILE.identity_keys
 
 OSSATURE_ATTR_DEFS: list[dict[str, Any]] = [
     {
@@ -109,13 +94,7 @@ OSSATURE_PLACO_RULE = register_rule(
     CategoryRule(
         code=CATEGORY_OSSATURE_PLACO,
         category_name="Ossature placo",
-        identity_keys=IDENTITY_KEYS,
-        product_key_map={
-            "kind": "kind",
-            "profile": "profile",
-            "nominal_length_mm": "length_mm",
-        },
-        normalizations=(NOMINAL_LENGTH_SPEC,),
+        identity=LINEAR_PROFILE,
         pmc_code_prefixes=("PMC-RAIL-", "PMC-MONTANT-", "PMC-FOURRURE-"),
         pmc_category_equals=("Ossature",),
         designation_ilike=(
@@ -129,9 +108,6 @@ OSSATURE_PLACO_RULE = register_rule(
             "F45",
             "ossature",
         ),
-        allow_high=False,
-        partial_strategy=PARTIAL_HIERARCHY,
-        hierarchy_keys=("kind", "profile"),
         attribute_defs=tuple(OSSATURE_ATTR_DEFS),
         reference_unit_default="pièce",
         algorithm_version=ALGORITHM_VERSION_OSSATURE_V1,
@@ -140,3 +116,13 @@ OSSATURE_PLACO_RULE = register_rule(
         enrich_product_attrs=product_identity,
     )
 )
+
+__all__ = [
+    "IDENTITY_KEYS",
+    "NOMINAL_LENGTH_MAP",
+    "NOMINAL_LENGTH_SPEC",
+    "OSSATURE_ATTR_DEFS",
+    "OSSATURE_PLACO_RULE",
+    "kind_from_product",
+    "product_identity",
+]

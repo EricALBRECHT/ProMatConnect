@@ -42,14 +42,21 @@ from app.services.product_mapping.primitives import (
 )
 from app.services.product_mapping.rules import get_rule, registered_codes
 from app.services.product_mapping.rules.base import (
+    CategoryRule,
     NormalizationSpec,
     apply_normalization_specs,
+)
+from app.services.product_mapping.identity_models import (
+    BOARD_PANEL,
+    DIMENSIONAL_FASTENER,
+    LINEAR_PROFILE,
 )
 from app.services.product_mapping.rules.ossature_placo import (
     NOMINAL_LENGTH_MAP,
     OSSATURE_PLACO_RULE,
 )
 from app.services.product_mapping.rules.plaque_platre import PLAQUE_PLATRE_RULE
+from app.services.product_mapping.rules.vis_agglo import VIS_AGGLO_RULE
 from app.services.product_mapping.rules.vis_placo import VIS_PLACO_RULE
 from app.services.product_mapping.vis_extractor import extract_vis_placo
 from app.services.product_mapping.service import ProductMappingService
@@ -90,9 +97,12 @@ def test_identity_keys_declared_by_rule():
 
 def test_rule_registry_exposes_every_category():
     assert registered_codes() == (
+        "CHEVILLE_METAL",
         "OSSATURE_PLACO",
         "PLAQUE_PLATRE",
         "VIS_AGGLO",
+        "VIS_BOIS",
+        "VIS_MULTI",
         "VIS_PLACO",
     )
     assert get_rule("OSSATURE_PLACO") is OSSATURE_PLACO_RULE
@@ -393,6 +403,7 @@ def test_pipeline_is_exact_applicable_refuses_unknown_identity():
 def test_vis_placo_added_without_dedicated_matcher_or_pipeline():
     """Ajouter une famille = une CategoryRule + un extracteur de primitives."""
     rule = VIS_PLACO_RULE
+    assert rule.identity is DIMENSIONAL_FASTENER
     assert rule.identity_keys == ("type", "diameter_mm", "length_mm")
     assert rule.product_key("diameter_mm") == "diameter_mm"
     # Aucune table de correspondance : les diamètres fournisseur sont déjà nominaux
@@ -426,3 +437,62 @@ def test_vis_placo_added_without_dedicated_matcher_or_pipeline():
     )
     assert m.status == PROPOSAL_EXACT
     assert m.algorithm_version == "vis_match.v1"
+
+
+# --- IdentityModel V2.5 ---------------------------------------------------
+
+def test_rules_share_identity_models():
+    assert VIS_PLACO_RULE.identity is DIMENSIONAL_FASTENER
+    assert VIS_AGGLO_RULE.identity is DIMENSIONAL_FASTENER
+    assert OSSATURE_PLACO_RULE.identity is LINEAR_PROFILE
+    assert PLAQUE_PLATRE_RULE.identity is BOARD_PANEL
+    assert "packaging_qty" in DIMENSIONAL_FASTENER.ignored_for_identity
+    assert "head" in DIMENSIONAL_FASTENER.ignored_for_identity
+
+
+def test_synthetic_test_fastener_reuses_dimensional_fastener_without_new_matcher():
+    """Nouvelle famille proche = CategoryRule légère + IdentityModel existant.
+
+    Aucun matcher dédié, aucun pipeline dédié, pas d'enregistrement métier DB.
+    """
+    rule = CategoryRule(
+        code="TEST_FASTENER",
+        category_name="Test fastener (synthétique)",
+        identity=DIMENSIONAL_FASTENER,
+        pmc_code_prefixes=("PMC-TEST-FAST-",),
+        algorithm_version="test_fastener.v0",
+        extractor_version="test_fastener.v0",
+    )
+    # Non enregistré dans le registre métier
+    assert "TEST_FASTENER" not in registered_codes()
+    assert rule.identity_keys == DIMENSIONAL_FASTENER.identity_keys
+    assert rule.hierarchy_keys == ("type", "diameter_mm")
+
+    attrs = {
+        "type": "test",
+        "diameter_mm": 5.0,
+        "length_mm": 40,
+        "packaging_qty": 200,  # hors identité
+        "finish": "zinc",
+    }
+    assert DIMENSIONAL_FASTENER.identity_view(attrs) == {
+        "type": "test",
+        "diameter_mm": 5.0,
+        "length_mm": 40,
+    }
+
+    m = generic_matcher.best_match(
+        rule,
+        attrs,
+        [
+            (
+                99,
+                "PMC-TEST-FAST-5X40",
+                {"type": "test", "diameter_mm": 5.0, "length_mm": 40},
+                "Test fastener",
+            )
+        ],
+    )
+    assert m.status == PROPOSAL_EXACT
+    assert m.product_code == "PMC-TEST-FAST-5X40"
+    assert m.algorithm_version == "test_fastener.v0"

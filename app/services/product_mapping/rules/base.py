@@ -1,18 +1,21 @@
 """CategoryRule — description déclarative d'une famille produit.
 
-Une catégorie = une configuration (clés d'identité, sélecteurs PMC, filtres SQL,
-normalisations explicites) + deux callables métier (extraction, projection PMC).
-Le moteur générique (generic_matcher / pipeline) ne connaît rien d'autre.
+Une catégorie = IdentityModel (identité réutilisable) + classification /
+extraction / sélection PMC spécifiques. Le moteur générique
+(generic_matcher / pipeline) ne lit que CategoryRule.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
+
+if TYPE_CHECKING:
+    from app.services.product_mapping.identity import IdentityModel
 
 # Stratégies de repli quand l'identité n'est pas complètement satisfaite.
 PARTIAL_DIMS = "dims"  # plaques : dimensions identiques → HIGH / REVIEW
-PARTIAL_HIERARCHY = "hierarchy"  # ossature : kind → profile → longueur
+PARTIAL_HIERARCHY = "hierarchy"  # ossature / visserie : tête de hiérarchie → longueur
 
 ALGORITHM_VERSION_GENERIC_V2 = "generic_match.v2"
 EXTRACTOR_VERSION_GENERIC_V2 = "generic_extract.v2"
@@ -54,7 +57,8 @@ class CategoryRule:
     code: str
     category_name: str = ""
 
-    # --- Identité de matching ---
+    # --- Identité (modèle réutilisable + champs matériels pour le matcher) ---
+    identity: IdentityModel | None = None
     identity_keys: tuple[str, ...] = ()
     product_key_map: Mapping[str, str] = field(default_factory=dict)
     normalizations: tuple[NormalizationSpec, ...] = ()
@@ -87,6 +91,21 @@ class CategoryRule:
     # --- Callables métier ---
     extract: Callable[..., Any] | None = None
     enrich_product_attrs: Callable[[str, dict | None, str | None], dict] = _default_enrich
+
+    def __post_init__(self) -> None:
+        """Matérialise l'IdentityModel sur les champs lus par generic_matcher."""
+        model = self.identity
+        if model is None:
+            return
+        object.__setattr__(self, "identity_keys", model.identity_keys)
+        object.__setattr__(self, "product_key_map", dict(model.product_key_map))
+        object.__setattr__(self, "normalizations", model.normalizations)
+        object.__setattr__(self, "allow_high", model.allow_high)
+        object.__setattr__(self, "partial_strategy", model.partial_strategy)
+        object.__setattr__(self, "optional_compat_keys", model.optional_compat_keys)
+        object.__setattr__(self, "dim_keys_for_partial", model.dim_keys_for_partial)
+        object.__setattr__(self, "high_type_key", model.high_type_key)
+        object.__setattr__(self, "hierarchy_keys", model.hierarchy_keys)
 
     def product_key(self, extracted_key: str) -> str:
         return self.product_key_map.get(extracted_key, extracted_key)

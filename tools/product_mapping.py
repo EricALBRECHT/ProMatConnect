@@ -12,6 +12,9 @@ Exemples :
   python tools/product_mapping.py catalog-discover --supplier BRICO_DEPOT --format text
   python tools/product_mapping.py catalog-discover --format json
   python tools/product_mapping.py catalog-discover --discover-version 1   # V1 legacy
+  python tools/product_mapping.py catalog-batch-discover --supplier BRICO_DEPOT --format text
+  python tools/product_mapping.py catalog-batch-discover --format json --min-size 15 --top 50
+  python tools/product_mapping.py catalog-batch-consolidate --supplier BRICO_DEPOT --format text
 """
 
 from __future__ import annotations
@@ -31,9 +34,12 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.database import make_engine
 from app.models.product_mapping import (
+    CATEGORY_CHEVILLE_METAL,
     CATEGORY_OSSATURE_PLACO,
     CATEGORY_PLAQUE_PLATRE,
     CATEGORY_VIS_AGGLO,
+    CATEGORY_VIS_BOIS,
+    CATEGORY_VIS_MULTI,
     CATEGORY_VIS_PLACO,
 )
 from app.services.product_mapping import ProductMappingService
@@ -46,6 +52,23 @@ from app.services.product_mapping.catalog_discover import (
     DEFAULT_TOP_CLUSTERS,
     format_text_report,
     run_catalog_discover,
+)
+from app.services.product_mapping.batch_discover import (
+    DEFAULT_MIN_SIZE as BATCH_DEFAULT_MIN_SIZE,
+    DEFAULT_TOP as BATCH_DEFAULT_TOP,
+    format_text_report as format_batch_text_report,
+    run_batch_discover,
+)
+from app.services.product_mapping.batch_consolidate import (
+    format_consolidation_text,
+    run_batch_consolidate,
+)
+from app.services.product_mapping.fastener_batch import (
+    apply_if_clean,
+    audit_exact_matches,
+    count_mapped_sp,
+    dry_run_summary,
+    seed_fastener_family_products,
 )
 from app.services.product_mapping.generic_matcher import (
     REASON_ALREADY_MAPPED,
@@ -308,6 +331,15 @@ def _print_generic_report(result, rule) -> None:
 
 
 CATALOG_DISCOVER_COMMAND = "catalog-discover"
+CATALOG_BATCH_DISCOVER_COMMAND = "catalog-batch-discover"
+CATALOG_BATCH_CONSOLIDATE_COMMAND = "catalog-batch-consolidate"
+FASTENER_BATCH_COMMAND = "fastener-batch"
+
+FASTENER_BATCH_CATEGORIES = (
+    CATEGORY_VIS_BOIS,
+    CATEGORY_VIS_MULTI,
+    CATEGORY_CHEVILLE_METAL,
+)
 
 
 def parse_catalog_discover_args(argv: list[str]) -> argparse.Namespace:
@@ -412,6 +444,203 @@ def main_catalog_discover(argv: list[str]) -> int:
     return 0
 
 
+def parse_catalog_batch_discover_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog=f"product_mapping.py {CATALOG_BATCH_DISCOVER_COMMAND}",
+        description=(
+            "Qualification READ-ONLY multi-familles (Catalog Discover V2 + "
+            "IdentityModel candidates). Aucune écriture."
+        ),
+    )
+    p.add_argument(
+        "--supplier",
+        default=None,
+        help="Nom du fournisseur (défaut : tous les fournisseurs).",
+    )
+    p.add_argument("--format", default="text", choices=("text", "json"))
+    p.add_argument(
+        "--min-size",
+        type=int,
+        default=BATCH_DEFAULT_MIN_SIZE,
+        help=f"Taille minimale d'une famille analysée (défaut {BATCH_DEFAULT_MIN_SIZE}).",
+    )
+    p.add_argument(
+        "--top",
+        type=int,
+        default=BATCH_DEFAULT_TOP,
+        help=f"Nombre de quick wins / high impact (défaut {BATCH_DEFAULT_TOP}).",
+    )
+    p.add_argument(
+        "--example-limit",
+        type=int,
+        default=8,
+        help="Exemples représentatifs par famille (défaut 8).",
+    )
+    p.add_argument(
+        "--min-cluster-size",
+        type=int,
+        default=None,
+        help="Seuil clustering Discover V2 (défaut : min(15, min-size)).",
+    )
+    return p.parse_args(argv)
+
+
+def main_catalog_batch_discover(argv: list[str]) -> int:
+    """Sous-commande lecture seule — aucune écriture métier."""
+    args = parse_catalog_batch_discover_args(argv)
+    if args.min_size < 1 or args.top < 1 or args.example_limit < 1:
+        print("Refusé : --min-size, --top et --example-limit >= 1.", file=sys.stderr)
+        return 2
+    if args.min_cluster_size is not None and args.min_cluster_size < 1:
+        print("Refusé : --min-cluster-size >= 1.", file=sys.stderr)
+        return 2
+
+    settings = Settings()
+    engine = make_engine(settings.database_url)
+    with Session(engine) as session:
+        report = run_batch_discover(
+            session,
+            supplier_name=args.supplier,
+            min_size=args.min_size,
+            top=args.top,
+            example_limit=args.example_limit,
+            min_cluster_size=args.min_cluster_size,
+        )
+        session.rollback()
+    if args.format == "json":
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        print(format_batch_text_report(report, top=args.top))
+    return 0
+
+
+def parse_catalog_batch_consolidate_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog=f"product_mapping.py {CATALOG_BATCH_CONSOLIDATE_COMMAND}",
+        description=(
+            "Consolidation READ-ONLY V1.1 des candidats industrialisables "
+            "(natures PRODUCT_FAMILY / ATTRIBUTE_CLUSTER, dédoublonnage SP)."
+        ),
+    )
+    p.add_argument("--supplier", default=None)
+    p.add_argument("--format", default="text", choices=("text", "json"))
+    p.add_argument("--min-size", type=int, default=BATCH_DEFAULT_MIN_SIZE)
+    p.add_argument("--top", type=int, default=BATCH_DEFAULT_TOP)
+    return p.parse_args(argv)
+
+
+def main_catalog_batch_consolidate(argv: list[str]) -> int:
+    args = parse_catalog_batch_consolidate_args(argv)
+    if args.min_size < 1 or args.top < 1:
+        print("Refusé : --min-size et --top >= 1.", file=sys.stderr)
+        return 2
+    settings = Settings()
+    engine = make_engine(settings.database_url)
+    with Session(engine) as session:
+        report = run_batch_consolidate(
+            session,
+            supplier_name=args.supplier,
+            min_size=args.min_size,
+            top=args.top,
+        )
+        session.rollback()
+    if args.format == "json":
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        print(format_consolidation_text(report))
+    return 0
+
+
+def parse_fastener_batch_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog=f"product_mapping.py {FASTENER_BATCH_COMMAND}",
+        description=(
+            "Batch FASTENER V1 : seed PMC + dry-run + audit EXACT + apply "
+            "(VIS_BOIS, VIS_MULTI, CHEVILLE_METAL)."
+        ),
+    )
+    p.add_argument("--supplier", default="BRICO_DEPOT")
+    p.add_argument(
+        "--apply",
+        action="store_true",
+        help="Appliquer EXACT si audit mismatch=0 (sinon seed+dry-run seulement).",
+    )
+    p.add_argument(
+        "--dry-run-only",
+        action="store_true",
+        help="Ne pas seed ni apply — compteurs dry-run uniquement.",
+    )
+    p.add_argument("--format", default="text", choices=("text", "json"))
+    return p.parse_args(argv)
+
+
+def main_fastener_batch(argv: list[str]) -> int:
+    args = parse_fastener_batch_args(argv)
+    settings = Settings()
+    engine = make_engine(settings.database_url)
+    report: dict = {"families": [], "mapped_before": 0, "mapped_after": 0}
+    with Session(engine) as session:
+        report["mapped_before"] = count_mapped_sp(session)
+        for code in FASTENER_BATCH_CATEGORIES:
+            family_report: dict = {"category": code}
+            if not args.dry_run_only:
+                family_report["seed"] = seed_fastener_family_products(session, code)
+                session.flush()
+            family_report["dry_run"] = dry_run_summary(session, code)
+            family_report["exact_audit"] = audit_exact_matches(session, code)
+            if args.apply and not args.dry_run_only:
+                family_report["apply"] = apply_if_clean(session, code)
+                session.flush()
+                # Idempotence : second apply
+                family_report["apply_second"] = apply_if_clean(session, code)
+                family_report["dry_run_after"] = dry_run_summary(session, code)
+            report["families"].append(family_report)
+        if args.apply and not args.dry_run_only:
+            session.commit()
+        else:
+            if not args.dry_run_only:
+                # Seed only — commit products for subsequent apply runs
+                session.commit()
+            else:
+                session.rollback()
+        report["mapped_after"] = count_mapped_sp(session)
+
+    if args.format == "json":
+        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    else:
+        print("=== FASTENER BATCH V1 ===")
+        print(f"mapped_before={report['mapped_before']} mapped_after={report['mapped_after']}")
+        for fam in report["families"]:
+            print(f"\n--- {fam['category']} ---")
+            if "seed" in fam:
+                s = fam["seed"]
+                print(
+                    f"seed identities={s['identities_found']} "
+                    f"created={s['created']} skipped={s['skipped_existing']}"
+                )
+            d = fam["dry_run"]
+            print(
+                f"dry-run candidates={d['candidates']} NTC={d['not_this_category']} "
+                f"ALREADY={d['already_mapped']} EXACT={d['exact']} "
+                f"NO_PMC={d['no_pmc_product']} INSUFF={d['insufficient_data']} "
+                f"REVIEW={d['review']} AMBIG={d['ambiguous']}"
+            )
+            a = fam["exact_audit"]
+            print(f"exact_audit ok={a['exact_ok']} mismatches={a['mismatch_count']}")
+            if fam.get("apply"):
+                ap = fam["apply"]
+                print(
+                    f"apply applied={ap.get('applied')} "
+                    f"second={fam.get('apply_second', {}).get('applied')}"
+                )
+                if fam.get("dry_run_after"):
+                    da = fam["dry_run_after"]
+                    print(
+                        f"after ALREADY={da['already_mapped']} EXACT={da['exact']}"
+                    )
+    return 0
+
+
 def _print_apply(result) -> None:
     d = result.to_dict()
     print("=== Apply EXACT PLAQUE_PLATRE ===")
@@ -426,6 +655,12 @@ def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     if raw and raw[0] == CATALOG_DISCOVER_COMMAND:
         return main_catalog_discover(raw[1:])
+    if raw and raw[0] == CATALOG_BATCH_DISCOVER_COMMAND:
+        return main_catalog_batch_discover(raw[1:])
+    if raw and raw[0] == CATALOG_BATCH_CONSOLIDATE_COMMAND:
+        return main_catalog_batch_consolidate(raw[1:])
+    if raw and raw[0] == FASTENER_BATCH_COMMAND:
+        return main_fastener_batch(raw[1:])
 
     args = parse_args(argv)
     if args.apply_exact and args.category != CATEGORY_PLAQUE_PLATRE:

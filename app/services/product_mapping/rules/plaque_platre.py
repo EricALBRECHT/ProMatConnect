@@ -1,7 +1,7 @@
-"""CategoryRule PLAQUE_PLATRE — identité L × l × Ép. + type.
+"""CategoryRule PLAQUE_PLATRE — IdentityModel BOARD_PANEL.
 
-Les flags fonctionnels (hydrofuge / feu / phonique) sont des compatibilités
-optionnelles : un conflit dégrade le match, une absence ne le crée jamais.
+Les flags fonctionnels (hydrofuge / feu / phonique) restent des compatibilités
+optionnelles portées par le modèle ; enrich_product_attrs reste spécifique.
 """
 
 from __future__ import annotations
@@ -13,15 +13,16 @@ from app.models.product_mapping import (
     CATEGORY_PLAQUE_PLATRE,
     EXTRACTOR_VERSION_PLAQUE_V1,
 )
-from app.services.product_mapping.rules.base import (
-    PARTIAL_DIMS,
-    CategoryRule,
-    register_rule,
+from app.services.product_mapping.identity_models import (
+    BOARD_PANEL,
+    BOARD_PANEL_BOOL_COMPAT,
+    BOARD_PANEL_DIM_KEYS,
 )
+from app.services.product_mapping.rules.base import CategoryRule, register_rule
 
-IDENTITY_KEYS = ("length_mm", "width_mm", "thickness_mm", "type")
-BOOL_COMPAT_KEYS = ("hydrofuge", "fire_resistant", "acoustic")
-DIM_KEYS = ("length_mm", "width_mm", "thickness_mm")
+IDENTITY_KEYS = BOARD_PANEL.identity_keys
+BOOL_COMPAT_KEYS = BOARD_PANEL_BOOL_COMPAT
+DIM_KEYS = BOARD_PANEL_DIM_KEYS
 
 PLAQUE_ATTR_DEFS: list[dict[str, Any]] = [
     {
@@ -108,7 +109,6 @@ def product_identity(
 
 
 def _extract(designation: str, category_path: str | None = None):
-    # Import tardif : l'extracteur importe les primitives, pas la règle.
     from app.services.product_mapping.plaque_extractor import extract_plaque_platre
 
     return extract_plaque_platre(designation=designation, category_path=category_path)
@@ -118,14 +118,7 @@ PLAQUE_PLATRE_RULE = register_rule(
     CategoryRule(
         code=CATEGORY_PLAQUE_PLATRE,
         category_name="Plaques de plâtre",
-        identity_keys=IDENTITY_KEYS,
-        product_key_map={
-            "length_mm": "length_mm",
-            "width_mm": "width_mm",
-            "thickness_mm": "thickness_mm",
-            "type": "type",
-        },
-        normalizations=(),
+        identity=BOARD_PANEL,
         pmc_code_prefixes=("PMC-BA",),
         pmc_subcategory_equals=("Plaques de plâtre",),
         designation_ilike=(
@@ -140,11 +133,6 @@ PLAQUE_PLATRE_RULE = register_rule(
             "Purelight",
             "placo",
         ),
-        allow_high=True,
-        partial_strategy=PARTIAL_DIMS,
-        optional_compat_keys=BOOL_COMPAT_KEYS,
-        dim_keys_for_partial=DIM_KEYS,
-        high_type_key="type",
         attribute_defs=tuple(PLAQUE_ATTR_DEFS),
         reference_unit_default="pièce",
         algorithm_version=ALGORITHM_VERSION_PLAQUE_V1,

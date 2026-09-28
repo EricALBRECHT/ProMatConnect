@@ -1,4 +1,4 @@
-"""CategoryRule VIS_AGGLO — identité type + diamètre + longueur (type=agglo)."""
+"""CategoryRule VIS_AGGLO — IdentityModel DIMENSIONAL_FASTENER (type=agglo)."""
 
 from __future__ import annotations
 
@@ -9,13 +9,10 @@ from app.models.product_mapping import (
     CATEGORY_VIS_AGGLO,
     EXTRACTOR_VERSION_VIS_AGGLO_V1,
 )
-from app.services.product_mapping.rules.base import (
-    PARTIAL_HIERARCHY,
-    CategoryRule,
-    register_rule,
-)
+from app.services.product_mapping.identity_models import DIMENSIONAL_FASTENER
+from app.services.product_mapping.rules.base import CategoryRule, register_rule
 
-IDENTITY_KEYS = ("type", "diameter_mm", "length_mm")
+IDENTITY_KEYS = DIMENSIONAL_FASTENER.identity_keys
 
 VIS_AGGLO_ATTR_DEFS: list[dict[str, Any]] = [
     {
@@ -77,22 +74,13 @@ VIS_AGGLO_RULE = register_rule(
     CategoryRule(
         code=CATEGORY_VIS_AGGLO,
         category_name="Vis agglo",
-        identity_keys=IDENTITY_KEYS,
-        product_key_map={
-            "type": "type",
-            "diameter_mm": "diameter_mm",
-            "length_mm": "length_mm",
-        },
-        normalizations=(),
+        identity=DIMENSIONAL_FASTENER,
         pmc_code_prefixes=("PMC-VIS-AGGLO-",),
         pmc_subcategory_equals=("Vis agglo",),
         designation_ilike=(
             "vis agglo",
             "agglo",
         ),
-        allow_high=False,
-        partial_strategy=PARTIAL_HIERARCHY,
-        hierarchy_keys=("type", "diameter_mm"),
         attribute_defs=tuple(VIS_AGGLO_ATTR_DEFS),
         reference_unit_default="pièce",
         algorithm_version=ALGORITHM_VERSION_VIS_AGGLO_V1,
