@@ -98,8 +98,13 @@ def test_identity_keys_declared_by_rule():
 def test_rule_registry_exposes_every_category():
     assert registered_codes() == (
         "CHEVILLE_METAL",
+        "CORNIERE_PVC",
+        "FER_BETON",
         "OSSATURE_PLACO",
+        "PANNEAU_MDF",
         "PLAQUE_PLATRE",
+        "ROND_ACIER",
+        "TUBE_ROND_ACIER",
         "VIS_AGGLO",
         "VIS_BOIS",
         "VIS_MULTI",

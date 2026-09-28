@@ -70,6 +70,7 @@ from app.services.product_mapping.fastener_batch import (
     dry_run_summary,
     seed_fastener_family_products,
 )
+from app.services.product_mapping import profiles_batch as profiles_batch_svc
 from app.services.product_mapping.generic_matcher import (
     REASON_ALREADY_MAPPED,
     REASON_INSUFFICIENT_DATA,
@@ -334,6 +335,7 @@ CATALOG_DISCOVER_COMMAND = "catalog-discover"
 CATALOG_BATCH_DISCOVER_COMMAND = "catalog-batch-discover"
 CATALOG_BATCH_CONSOLIDATE_COMMAND = "catalog-batch-consolidate"
 FASTENER_BATCH_COMMAND = "fastener-batch"
+PROFILES_BATCH_COMMAND = "profiles-batch"
 
 FASTENER_BATCH_CATEGORIES = (
     CATEGORY_VIS_BOIS,
@@ -641,6 +643,89 @@ def main_fastener_batch(argv: list[str]) -> int:
     return 0
 
 
+def parse_profiles_batch_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog=f"product_mapping.py {PROFILES_BATCH_COMMAND}",
+        description=(
+            "Lot profilés/panneaux : CORNIERE_PVC, ROND_ACIER, TUBE_ROND_ACIER, "
+            "FER_BETON, PANNEAU_MDF."
+        ),
+    )
+    p.add_argument("--supplier", default="BRICO_DEPOT")
+    p.add_argument("--apply", action="store_true")
+    p.add_argument("--dry-run-only", action="store_true")
+    p.add_argument("--format", default="text", choices=("text", "json"))
+    return p.parse_args(argv)
+
+
+def main_profiles_batch(argv: list[str]) -> int:
+    args = parse_profiles_batch_args(argv)
+    settings = Settings()
+    engine = make_engine(settings.database_url)
+    report: dict = {"families": [], "mapped_before": 0, "mapped_after": 0}
+    with Session(engine) as session:
+        report["mapped_before"] = profiles_batch_svc.count_mapped_sp(session)
+        for code in profiles_batch_svc.LOT_CATEGORIES:
+            family_report: dict = {"category": code}
+            if not args.dry_run_only:
+                family_report["seed"] = profiles_batch_svc.seed_family(session, code)
+                session.flush()
+            family_report["dry_run"] = profiles_batch_svc.dry_run_summary(session, code)
+            family_report["exact_audit"] = profiles_batch_svc.audit_exact_matches(
+                session, code
+            )
+            if args.apply and not args.dry_run_only:
+                family_report["apply"] = profiles_batch_svc.apply_if_clean(session, code)
+                session.flush()
+                family_report["apply_second"] = profiles_batch_svc.apply_if_clean(
+                    session, code
+                )
+                family_report["dry_run_after"] = profiles_batch_svc.dry_run_summary(
+                    session, code
+                )
+            report["families"].append(family_report)
+        if args.apply and not args.dry_run_only:
+            session.commit()
+        elif not args.dry_run_only:
+            session.commit()
+        else:
+            session.rollback()
+        report["mapped_after"] = profiles_batch_svc.count_mapped_sp(session)
+
+    if args.format == "json":
+        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    else:
+        print("=== PROFILES BATCH ===")
+        print(
+            f"mapped_before={report['mapped_before']} "
+            f"mapped_after={report['mapped_after']}"
+        )
+        for fam in report["families"]:
+            print(f"\n--- {fam['category']} ---")
+            if "seed" in fam:
+                s = fam["seed"]
+                print(
+                    f"seed identities={s['identities_found']} "
+                    f"created={s['created']} skipped={s['skipped_existing']}"
+                )
+            d = fam["dry_run"]
+            print(
+                f"dry-run candidates={d['candidates']} NTC={d['not_this_category']} "
+                f"ALREADY={d['already_mapped']} EXACT={d['exact']} "
+                f"NO_PMC={d['no_pmc_product']} INSUFF={d['insufficient_data']} "
+                f"REVIEW={d['review']} AMBIG={d['ambiguous']}"
+            )
+            a = fam["exact_audit"]
+            print(f"exact_audit ok={a['exact_ok']} mismatches={a['mismatch_count']}")
+            if fam.get("apply"):
+                ap = fam["apply"]
+                print(
+                    f"apply applied={ap.get('applied')} "
+                    f"second={fam.get('apply_second', {}).get('applied')}"
+                )
+    return 0
+
+
 def _print_apply(result) -> None:
     d = result.to_dict()
     print("=== Apply EXACT PLAQUE_PLATRE ===")
@@ -661,6 +746,8 @@ def main(argv: list[str] | None = None) -> int:
         return main_catalog_batch_consolidate(raw[1:])
     if raw and raw[0] == FASTENER_BATCH_COMMAND:
         return main_fastener_batch(raw[1:])
+    if raw and raw[0] == PROFILES_BATCH_COMMAND:
+        return main_profiles_batch(raw[1:])
 
     args = parse_args(argv)
     if args.apply_exact and args.category != CATEGORY_PLAQUE_PLATRE:
