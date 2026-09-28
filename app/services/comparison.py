@@ -47,7 +47,20 @@ def line_cost(
     Conversion fiscale sur le total source (packs × price) avant arrondi monétaire.
     Si compare_basis est None : prix source tel quel (rétrocompat).
     """
-    packs = required_packs(quantity, offer.reference_quantity)
+    return packs_cost(
+        offer,
+        required_packs(quantity, offer.reference_quantity),
+        compare_basis=compare_basis,
+    )
+
+
+def packs_cost(
+    offer: ConnectorOffer,
+    packs: int,
+    *,
+    compare_basis: str | None = None,
+) -> Decimal:
+    """Coût de `packs` conditionnements, sans inventer de prix."""
     source_total = offer.price * packs
     if compare_basis is None:
         return money_round(source_total)
@@ -173,6 +186,94 @@ class ComparisonService:
             tax_basis_note=note,
         )
 
+    def _offer_rank(
+        self,
+        offer: ConnectorOffer,
+        quantity: Decimal,
+        tax_basis: str,
+        *,
+        packs: int | None = None,
+    ) -> tuple:
+        bought = packs if packs is not None else required_packs(quantity, offer.reference_quantity)
+        return (
+            packs_cost(offer, bought, compare_basis=tax_basis),
+            self._distance(offer),
+            offer.preparation_minutes,
+            offer.supplier,
+            resolve_agency_key(agency_key=offer.agency.agency_key, agency_id=offer.agency.id),
+            offer.supplier_reference,
+        )
+
+    def _selected_line(
+        self,
+        offer: ConnectorOffer,
+        product: ProductRead,
+        quantity: Decimal,
+        tax_basis: str,
+        *,
+        availability: str,
+    ) -> SelectedLine:
+        needed = required_packs(quantity, offer.reference_quantity)
+        packs = min(offer.stock, needed) if availability == "partial" else needed
+        purchased = packs * offer.reference_quantity
+        missing = quantity - purchased
+        if missing < 0:
+            missing = Decimal("0")
+        ref_unit = offer.reference_unit or product.reference_unit
+        converted_pack = display_converted(
+            offer.price, offer.tax_basis or "HT", offer.vat_rate, tax_basis
+        )
+        pack_price = converted_pack if converted_pack is not None else money_round(offer.price)
+        return SelectedLine(
+            product_id=product.id,
+            product_name=product.name,
+            reference_unit=ref_unit,
+            requested_quantity=quantity,
+            purchased_quantity=purchased,
+            packs=packs,
+            supplier=offer.supplier,
+            supplier_reference=offer.supplier_reference,
+            supplier_unit=offer.supplier_unit,
+            agency_id=offer.agency.id,
+            agency_key=resolve_agency_key(
+                agency_key=offer.agency.agency_key, agency_id=offer.agency.id
+            ),
+            pack_price=pack_price,
+            line_total=packs_cost(offer, packs, compare_basis=tax_basis),
+            available_quantity=offer.available_quantity,
+            preparation_minutes=offer.preparation_minutes,
+            updated_at=offer.updated_at,
+            tax_basis=tax_basis,
+            image_url=offer.image_url,
+            packaging_quantity=offer.packaging_quantity,
+            reference_quantity=offer.reference_quantity,
+            source_price=offer.price,
+            source_tax_basis=offer.tax_basis or "HT",
+            vat_rate=offer.vat_rate,
+            live_status=offer.live_status,
+            fetched_at=offer.fetched_at,
+            availability=availability,
+            missing_quantity=missing if availability == "partial" else None,
+        )
+
+    def _remember_agency(self, agencies: dict, offer: ConnectorOffer) -> None:
+        agency_key = resolve_agency_key(
+            agency_key=offer.agency.agency_key, agency_id=offer.agency.id
+        )
+        distance = None if not offer.agency.is_geolocated else round(self._distance(offer), 2)
+        agencies[agency_key] = AgencyResult(
+            id=offer.agency.id,
+            agency_key=agency_key,
+            supplier=offer.supplier,
+            name=offer.agency.name,
+            address=offer.agency.address,
+            postal_code=offer.agency.postal_code,
+            city=offer.agency.city,
+            distance_km=distance,
+            is_geolocated=offer.agency.is_geolocated,
+            is_national_catalog=offer.agency.is_national_catalog,
+        )
+
     def _distance(self, offer: ConnectorOffer) -> float:
         if not offer.agency.is_geolocated:
             return float("inf")
@@ -192,93 +293,128 @@ class ComparisonService:
         available, unavailable, agencies = [], [], {}
         for line in lines:
             product = products[line.product_id]
-            candidates = [
+            comparable = [
                 o
                 for o in offers
                 if o.product_id == line.product_id
-                and o.covers_packs(required_packs(line.quantity, o.reference_quantity))
                 and can_compare_in_basis(o.tax_basis or "HT", o.vat_rate, tax_basis)
             ]
-            if not candidates:
+            delayed = [o for o in comparable if (o.fulfillment or "") == "delayed"]
+            on_order = [o for o in comparable if (o.fulfillment or "") == "order_only"]
+            blocked = [o for o in comparable if (o.fulfillment or "") == "unavailable"]
+            stock_offers = [
+                o
+                for o in comparable
+                if (o.fulfillment or "") not in {"delayed", "order_only", "unavailable"}
+            ]
+            full = [
+                o
+                for o in stock_offers
+                if o.covers_packs(required_packs(line.quantity, o.reference_quantity))
+            ]
+            partial = [
+                o
+                for o in stock_offers
+                if o.stock > 0
+                and not o.covers_packs(required_packs(line.quantity, o.reference_quantity))
+            ]
+            if full:
+                offer = min(full, key=lambda o: self._offer_rank(o, line.quantity, tax_basis))
+                available.append(
+                    self._selected_line(
+                        offer, product, line.quantity, tax_basis, availability="available"
+                    )
+                )
+                self._remember_agency(agencies, offer)
+                continue
+            if partial:
+                offer = min(
+                    partial,
+                    key=lambda o: (
+                        -min(o.stock, required_packs(line.quantity, o.reference_quantity)),
+                        *self._offer_rank(
+                            o,
+                            line.quantity,
+                            tax_basis,
+                            packs=min(o.stock, required_packs(line.quantity, o.reference_quantity)),
+                        ),
+                    ),
+                )
+                available.append(
+                    self._selected_line(
+                        offer, product, line.quantity, tax_basis, availability="partial"
+                    )
+                )
+                self._remember_agency(agencies, offer)
+                continue
+            if delayed or on_order:
+                pool = delayed or on_order
+                kind = "delayed" if delayed else "order_only"
+                offer = min(pool, key=lambda o: self._offer_rank(o, line.quantity, tax_basis))
+                available.append(
+                    self._selected_line(
+                        offer, product, line.quantity, tax_basis, availability=kind
+                    )
+                )
+                self._remember_agency(agencies, offer)
+                continue
+            if blocked and not stock_offers:
                 unavailable.append(
                     UnavailableLine(
                         product_id=product.id,
                         product_name=product.name,
                         quantity=line.quantity,
+                        availability="unavailable",
+                        reason="Indisponible",
                     )
                 )
-                continue
-            offer = min(
-                candidates,
-                key=lambda o: (
-                    line_cost(o, line.quantity, compare_basis=tax_basis),
-                    self._distance(o),
-                    o.preparation_minutes,
-                    o.supplier,
-                    resolve_agency_key(agency_key=o.agency.agency_key, agency_id=o.agency.id),
-                    o.supplier_reference,
-                ),
-            )
-            packs = required_packs(line.quantity, offer.reference_quantity)
-            ref_unit = offer.reference_unit or product.reference_unit
-            converted_pack = display_converted(
-                offer.price, offer.tax_basis or "HT", offer.vat_rate, tax_basis
-            )
-            pack_price = (
-                converted_pack if converted_pack is not None else money_round(offer.price)
-            )
-            agency_key = resolve_agency_key(
-                agency_key=offer.agency.agency_key, agency_id=offer.agency.id
-            )
-            available.append(
-                SelectedLine(
-                    product_id=product.id,
-                    product_name=product.name,
-                    reference_unit=ref_unit,
-                    requested_quantity=line.quantity,
-                    purchased_quantity=packs * offer.reference_quantity,
-                    packs=packs,
-                    supplier=offer.supplier,
-                    supplier_reference=offer.supplier_reference,
-                    supplier_unit=offer.supplier_unit,
-                    agency_id=offer.agency.id,
-                    agency_key=agency_key,
-                    pack_price=pack_price,
-                    line_total=line_cost(offer, line.quantity, compare_basis=tax_basis),
-                    available_quantity=offer.available_quantity,
-                    preparation_minutes=offer.preparation_minutes,
-                    updated_at=offer.updated_at,
-                    tax_basis=tax_basis,
-                    image_url=offer.image_url,
-                    packaging_quantity=offer.packaging_quantity,
-                    reference_quantity=offer.reference_quantity,
-                    source_price=offer.price,
-                    source_tax_basis=offer.tax_basis or "HT",
-                    vat_rate=offer.vat_rate,
+            elif comparable:
+                unavailable.append(
+                    UnavailableLine(
+                        product_id=product.id,
+                        product_name=product.name,
+                        quantity=line.quantity,
+                        availability="out_of_stock",
+                        reason="Indisponible dans ce dépôt",
+                    )
                 )
-            )
-            distance = None if not offer.agency.is_geolocated else round(self._distance(offer), 2)
-            agencies[agency_key] = AgencyResult(
-                id=offer.agency.id,
-                agency_key=agency_key,
-                supplier=offer.supplier,
-                name=offer.agency.name,
-                address=offer.agency.address,
-                postal_code=offer.agency.postal_code,
-                city=offer.agency.city,
-                distance_km=distance,
-                is_geolocated=offer.agency.is_geolocated,
-                is_national_catalog=offer.agency.is_national_catalog,
-            )
+            else:
+                unavailable.append(
+                    UnavailableLine(
+                        product_id=product.id,
+                        product_name=product.name,
+                        quantity=line.quantity,
+                        availability="unavailable",
+                        reason="Aucune offre exploitable pour ce produit.",
+                    )
+                )
         subtotal = sum((line.line_total for line in available), Decimal("0.00"))
+        requested = len(lines)
+        n_partial = sum(1 for line in available if line.availability == "partial")
+        n_later = sum(
+            1 for line in available if line.availability in {"delayed", "order_only"}
+        )
+        n_available = len(available) - n_partial - n_later
+        n_unavailable = len(unavailable)
+        complete = requested > 0 and n_available == requested
+        coverage = (
+            (Decimal(n_available) * Decimal("100") / Decimal(requested)).quantize(Decimal("0.01"))
+            if requested
+            else Decimal("0")
+        )
         return ComparisonOption(
             key=key,
             title=title,
-            valid=not unavailable,
-            total=subtotal if not unavailable else None,
+            valid=complete,
+            total=subtotal if complete else None,
             available_subtotal=subtotal,
             available=available,
             unavailable=unavailable,
+            lines_requested=requested,
+            lines_available=n_available,
+            lines_partial=n_partial,
+            lines_unavailable=n_unavailable,
+            coverage_rate=coverage,
             supplier_count=len({line.supplier for line in available}),
             agency_count=len(agencies),
             max_preparation_minutes=max(

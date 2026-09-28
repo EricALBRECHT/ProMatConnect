@@ -192,6 +192,8 @@ class BricoDepotConnector(SupplierConnector):
         self.max_stores = int(
             max_stores if max_stores is not None else self.settings.bricodepot_max_stores
         )
+        self._offer_origin: dict[tuple[str, str], str] = {}
+        self._cache_written = False
 
     @property
     def supplier_name(self) -> str:
@@ -265,9 +267,13 @@ class BricoDepotConnector(SupplierConnector):
             rows.append((sp, product))
         return rows
 
-    def get_offers(self, product_ids: list[int]) -> list[ConnectorOffer]:
+    def get_offers(
+        self, product_ids: list[int], *, force_refresh: bool = False
+    ) -> list[ConnectorOffer]:
+        self._offer_origin = {}
+        self._cache_written = False
         try:
-            return self._get_offers_unsafe(product_ids)
+            offers = self._get_offers_unsafe(product_ids, force_refresh=force_refresh)
         except BricoDepotClientError as exc:
             logger.warning("Brico Dépôt LIVE indisponible (%s): %s", self.insee_code, exc)
             return []
@@ -278,8 +284,16 @@ class BricoDepotConnector(SupplierConnector):
                 exc,
             )
             return []
+        if self._cache_written:
+            self.session.commit()
+        return offers
 
-    def _get_offers_unsafe(self, product_ids: list[int]) -> list[ConnectorOffer]:
+    def _live_ttl_s(self) -> int:
+        return int(self.settings.brico_live_cache_ttl_seconds)
+
+    def _get_offers_unsafe(
+        self, product_ids: list[int], *, force_refresh: bool = False
+    ) -> list[ConnectorOffer]:
         requested = sorted({int(pid) for pid in product_ids})
         logger.info(
             "Brico live: citycode=%s requested_products=%s",
@@ -309,17 +323,23 @@ class BricoDepotConnector(SupplierConnector):
         for retailer in retailers:
             agency = retailer_to_agency_data(retailer)
             store_id = str(retailer.entity_id)
-            self._refresh_store_skus(retailer, skus)
+            self._refresh_store_skus(retailer, skus, force_refresh=force_refresh)
             for sku, sp_pair in sku_to_sp.items():
                 cached = self._load_cached_offer(store_id, sku)
                 if cached is None:
                     continue
+                origin = self._offer_origin.get((store_id, sku))
+                if origin is None:
+                    origin = "cache" if cached.fully_fresh else "stale"
+                fetched = cached.price_fetched_at or cached.stock_fetched_at or now
                 built = self._build_from_cache(
                     cached=cached,
                     sp=sp_pair[0],
                     product=sp_pair[1],
                     agency=agency,
-                    updated_at=now,
+                    updated_at=fetched,
+                    live_status=origin,
+                    fetched_at=fetched,
                 )
                 if built is not None:
                     offers.append(built)
@@ -338,6 +358,7 @@ class BricoDepotConnector(SupplierConnector):
                 retailers = self.client.fetch_retailers(self.insee_code)
                 payload = [retailer_to_dict(r) for r in retailers]
                 self.cache.put_stores(CACHE_CONNECTOR_KEY, self.insee_code, payload)
+                self._cache_written = True
                 return sort_and_limit_retailers(retailers, max_stores=self.max_stores)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -360,10 +381,12 @@ class BricoDepotConnector(SupplierConnector):
             retailers_from_payload(stale.payload), max_stores=self.max_stores
         )
 
-    def _refresh_store_skus(self, retailer: BricoRetailer, skus: list[str]) -> None:
+    def _refresh_store_skus(
+        self, retailer: BricoRetailer, skus: list[str], *, force_refresh: bool = False
+    ) -> None:
         store_id = str(retailer.entity_id)
         plan = self.cache.plan_offer_refresh(CACHE_CONNECTOR_KEY, store_id, skus)
-        to_refresh = list(plan.skus_to_refresh)
+        to_refresh = list(skus) if force_refresh else list(plan.skus_to_refresh)
         if not to_refresh:
             return
         won = list(
@@ -373,6 +396,7 @@ class BricoDepotConnector(SupplierConnector):
         )
         if not won:
             return
+        ttl = self._live_ttl_s()
         for batch in chunk_skus(won, PRODUCT_SKU_PAGE_SIZE):
             try:
                 by_sku = self.client.fetch_products_by_sku(
@@ -388,39 +412,69 @@ class BricoDepotConnector(SupplierConnector):
                     self.cache.release_offer_refresh_lease(
                         CACHE_CONNECTOR_KEY, store_id, sku
                     )
+                    self._offer_origin[(store_id, sku)] = "stale"
                 continue
             for sku in batch:
                 product_offer = by_sku.get(sku)
-                if product_offer is None or product_offer.price_ht_piece.value is None:
-                    # Ne pas écraser une bonne entrée avec une réponse invalide.
+                if not self._store_product_offer(
+                    store_id, sku, retailer.seller_code, product_offer, ttl
+                ):
                     self.cache.release_offer_refresh_lease(
                         CACHE_CONNECTOR_KEY, store_id, sku
                     )
-                    continue
-                try:
-                    self.cache.put_offer(
-                        CACHE_CONNECTOR_KEY,
-                        store_id,
-                        sku,
-                        seller_code=retailer.seller_code,
-                        price_ht=product_offer.price_ht_piece.value,
-                        price_ttc=product_offer.price_ttc_piece.value,
-                        currency=(
-                            product_offer.price_ht_piece.currency
-                            or product_offer.price_ttc_piece.currency
-                            or "EUR"
-                        ),
-                        stock_quantity=product_offer.stock_quantity,
-                        stock_status=product_offer.stock_status,
-                        is_salable=product_offer.is_salable,
-                        is_offer_available=product_offer.is_offer_available,
-                        update_price=True,
-                        update_stock=True,
-                    )
-                except ValueError:
-                    self.cache.release_offer_refresh_lease(
-                        CACHE_CONNECTOR_KEY, store_id, sku
-                    )
+
+    def _store_product_offer(
+        self,
+        store_id: str,
+        sku: str,
+        seller_code: str | None,
+        product_offer: BricoProductOffer | None,
+        ttl: int,
+    ) -> bool:
+        """Enregistre la réponse, y compris stock 0 / invendable. False = rien écrit.
+
+        Une SKU absente de la réponse n'écrase pas une entrée valide.
+        """
+        if product_offer is None:
+            return False
+        negative = (
+            product_offer.stock_quantity == 0
+            or product_offer.is_salable is False
+            or product_offer.is_offer_available is False
+        )
+        price = product_offer.price_ht_piece.value
+        if price is None and not negative:
+            return False
+        stock_qty = product_offer.stock_quantity
+        if stock_qty is None and negative:
+            stock_qty = 0
+        try:
+            self.cache.put_offer(
+                CACHE_CONNECTOR_KEY,
+                store_id,
+                sku,
+                seller_code=seller_code,
+                price_ht=price,
+                price_ttc=product_offer.price_ttc_piece.value,
+                currency=(
+                    product_offer.price_ht_piece.currency
+                    or product_offer.price_ttc_piece.currency
+                    or "EUR"
+                ),
+                stock_quantity=stock_qty,
+                stock_status=product_offer.stock_status,
+                is_salable=product_offer.is_salable,
+                is_offer_available=product_offer.is_offer_available,
+                update_price=price is not None,
+                update_stock=True,
+                price_ttl_s=ttl,
+                stock_ttl_s=ttl,
+            )
+        except ValueError:
+            return False
+        self._cache_written = True
+        self._offer_origin[(store_id, sku)] = "live"
+        return True
 
     def _load_cached_offer(self, store_id: str, sku: str) -> CachedLiveOffer | None:
         entry = self.cache.get_offer(CACHE_CONNECTOR_KEY, store_id, sku)
@@ -441,6 +495,8 @@ class BricoDepotConnector(SupplierConnector):
         product: Product,
         agency: AgencyData,
         updated_at: datetime,
+        live_status: str | None = None,
+        fetched_at: datetime | None = None,
     ) -> ConnectorOffer | None:
         ht = cached.price_ht
         if ht is None:
@@ -475,6 +531,8 @@ class BricoDepotConnector(SupplierConnector):
             preparation_minutes=self.preparation_minutes,
             updated_at=updated_at,
             image_url=sp.image_url,
+            live_status=live_status,
+            fetched_at=fetched_at,
         )
 
     def _build_connector_offer(

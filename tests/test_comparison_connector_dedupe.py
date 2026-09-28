@@ -1,4 +1,4 @@
-"""Déduplication enseigne Brico + masquage fournisseurs TEST en mode live."""
+"""Déduplication enseigne Brico. La participation dépend de Supplier.active."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from app.connectors.registry import (
     build_comparison_connectors,
     build_connectors,
     build_live_connectors,
-    is_demo_test_supplier_name,
 )
 from app.database import Base
 from app.models import Supplier
@@ -60,14 +59,6 @@ def _seed_suppliers(session: Session) -> None:
     session.commit()
 
 
-def test_demo_test_supplier_name_convention():
-    assert is_demo_test_supplier_name("POINT.P TEST")
-    assert is_demo_test_supplier_name("GEDIMAT TEST")
-    assert not is_demo_test_supplier_name("POINT.P")
-    assert not is_demo_test_supplier_name("BRICO_DEPOT")
-    assert not is_demo_test_supplier_name("BRICO DEPOT")
-
-
 def test_live_off_keeps_file_brico_and_test_suppliers(session):
     _seed_suppliers(session)
     settings = Settings(bricodepot_live_enabled=False)
@@ -82,7 +73,7 @@ def test_live_off_keeps_file_brico_and_test_suppliers(session):
     assert build_live_connectors(session, resolved_origin=_origin(), settings=settings) == []
 
 
-def test_live_on_dedupes_brico_enseigne_and_hides_test(session):
+def test_live_on_dedupes_brico_enseigne_and_keeps_active_test(session):
     _seed_suppliers(session)
     settings = Settings(bricodepot_live_enabled=True, bricodepot_max_stores=1)
     connectors = build_comparison_connectors(
@@ -93,9 +84,8 @@ def test_live_on_dedupes_brico_enseigne_and_hides_test(session):
     assert names.count(SUPPLIER_NAME) == 1
     assert "BRICO_DEPOT" not in names
     assert not any(is_brico_supplier_name(n) and n != SUPPLIER_NAME for n in names)
-    # Seed TEST masqués tant qu'un live est présent
-    assert "POINT.P TEST" not in names
-    assert "GEDIMAT TEST" not in names
+    assert "POINT.P TEST" in names
+    assert "GEDIMAT TEST" in names
     # build_connectors brut inchangé (données conservées)
     raw = [c.supplier_name for c in build_connectors(session)]
     assert "BRICO_DEPOT" in raw

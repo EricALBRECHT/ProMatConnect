@@ -19,6 +19,18 @@
   let currentRows = [];
   let mode = "preview"; // preview | catalog
   let catalogContext = null;
+  /** @type {{catalogId:number|null,page:number,pageSize:number,q:string,mapping:string,price:string,supplier:string}} */
+  let mappingState = {
+    catalogId: null,
+    page: 1,
+    pageSize: 50,
+    q: "",
+    mapping: "all",
+    price: "all",
+    supplier: "",
+  };
+  /** @type {object|null} */
+  let mappingPageMeta = null;
 
   function esc(value) {
     return String(value ?? "")
@@ -147,37 +159,123 @@
     return { total: rows.length, mapped, todo: rows.length - mapped };
   }
 
-  function renderToolbar(rows) {
-    const c = countsFor(rows);
-    const suppliers = [...new Set(rows.map((r) => r.supplier).filter(Boolean))].sort();
-    const supplierFilters = suppliers
-      .map((s) => {
-        const key = s.toLowerCase().includes("leroy")
-          ? "leroy"
-          : s.toLowerCase().includes("brico")
-            ? "brico"
-            : "";
-        if (!key) return "";
-        return `<button type="button" class="chip filter-chip" data-filter="${key}">${esc(s)}</button>`;
-      })
+  function formatInt(n) {
+    return Number(n || 0).toLocaleString("fr-FR");
+  }
+
+  function pageNumberList(page, pages) {
+    if (pages <= 1) return [1];
+    const keep = new Set([1, pages]);
+    for (let i = page - 2; i <= page + 2; i += 1) {
+      if (i >= 1 && i <= pages) keep.add(i);
+    }
+    return [...keep].sort((a, b) => a - b);
+  }
+
+  function renderPaginationNav(meta) {
+    if (!meta || mode !== "catalog") return "";
+    const catalogTotal = Number(meta.catalog_total ?? meta.total ?? 0);
+    const filteredTotal = Number(meta.total ?? 0);
+    const page = Number(meta.page || 1);
+    const pages = Number(meta.pages || 1);
+    const size = Number(meta.page_size || 50);
+    const start = Number(meta.range_start || 0);
+    const end = Number(meta.range_end || 0);
+    const filtered =
+      Boolean(meta.q) ||
+      (meta.mapping && meta.mapping !== "all") ||
+      (meta.price && meta.price !== "all") ||
+      Boolean(meta.supplier) ||
+      filteredTotal !== catalogTotal;
+    const rangeLabel = `Affichage ${formatInt(start)}–${formatInt(end)} sur ${formatInt(filteredTotal)}`;
+    const filteredLine = filtered
+      ? `<div class="map-filtered-total"><strong>${formatInt(filteredTotal)}</strong> résultats filtrés</div>`
+      : "";
+    const sizeChips = [25, 50, 100, 200]
+      .map(
+        (n) =>
+          `<button type="button" class="chip map-page-size-btn${n === size ? " is-active" : ""}" data-set-page-size="${n}">${
+            n === 200 ? "200 par page" : String(n)
+          }</button>`
+      )
       .join("");
+    const nums = pageNumberList(page, pages);
+    let buttons = "";
+    let prev = 0;
+    nums.forEach((n) => {
+      if (prev && n > prev + 1) buttons += `<span class="muted map-page-ellipsis">…</span>`;
+      buttons += `<button type="button" class="chip map-page-btn${n === page ? " is-active" : ""}" data-page="${n}">${n}</button>`;
+      prev = n;
+    });
+    return `
+      <div class="map-pagination" data-map-pagination>
+        ${filteredLine}
+        <div class="map-page-summary">
+          <strong>${rangeLabel}</strong>
+          <span class="muted">Page ${formatInt(page)} / ${formatInt(pages)}</span>
+        </div>
+        <div class="map-page-sizes" role="group" aria-label="Références par page">${sizeChips}</div>
+        <div class="map-page-nav">
+          <button type="button" class="button secondary button-compact map-page-prev" ${page <= 1 ? "disabled" : ""}>← Précédent</button>
+          <div class="map-page-numbers">${buttons}</div>
+          <button type="button" class="button secondary button-compact map-page-next" ${page >= pages ? "disabled" : ""}>Suivant →</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function catalogCountersFromMeta(meta) {
+    return {
+      total: Number(meta.catalog_total ?? 0),
+      mapped: Number(meta.catalog_mapped ?? 0),
+      todo: Number(meta.catalog_unmapped ?? 0),
+    };
+  }
+
+  function renderToolbar(rows, meta = null) {
+    const c =
+      mode === "catalog" && meta
+        ? catalogCountersFromMeta(meta)
+        : countsFor(rows);
+    const suppliers =
+      mode === "catalog" && meta?.suppliers
+        ? meta.suppliers
+        : [...new Set(rows.map((r) => r.supplier).filter(Boolean))].sort();
+    const activeMapping = mode === "catalog" ? mappingState.mapping : "all";
+    const activePrice = mode === "catalog" ? mappingState.price : "all";
+    const activeSupplier = mode === "catalog" ? mappingState.supplier : "";
+    const searchValue = mode === "catalog" ? mappingState.q : "";
+    const allActive =
+      activeMapping === "all" && activePrice === "all" && !activeSupplier;
+    const supplierFilters = suppliers
+      .map(
+        (s) =>
+          `<button type="button" class="chip filter-chip${activeSupplier === s ? " is-active" : ""}" data-filter="supplier" data-supplier="${esc(s)}">${esc(s)}</button>`
+      )
+      .join("");
+    const pageSize = meta?.page_size || mappingState.pageSize || 50;
     return `
       <div class="map-toolbar">
         <div class="map-counters" data-map-counters>
-          <strong>${c.total}</strong> références ·
-          <strong data-c-mapped>${c.mapped}</strong> mappée(s) ·
-          <strong data-c-todo>${c.todo}</strong> à traiter
+          <strong>${formatInt(c.total)}</strong> références ·
+          <strong data-c-mapped>${formatInt(c.mapped)}</strong> mappée(s) ·
+          <strong data-c-todo>${formatInt(c.todo)}</strong> à traiter
         </div>
+        ${renderPaginationNav(meta)}
         <div class="map-filters">
-          <input type="search" class="map-filter-search" placeholder="Recherche fournisseur / réf. / nom…" />
-          <button type="button" class="chip filter-chip is-active" data-filter="all">Tous</button>
-          <button type="button" class="chip filter-chip" data-filter="unmapped">Non mappés</button>
-          <button type="button" class="chip filter-chip" data-filter="mapped">Mappés</button>
-          <button type="button" class="chip filter-chip" data-filter="with_price">Avec prix</button>
-          <button type="button" class="chip filter-chip" data-filter="without_price">Sans prix</button>
+          <input type="search" class="map-filter-search" placeholder="Recherche fournisseur / réf. / nom…" value="${esc(searchValue)}" />
+          <button type="button" class="chip filter-chip${allActive ? " is-active" : ""}" data-filter="all">Tous</button>
+          <button type="button" class="chip filter-chip${activeMapping === "unmapped" ? " is-active" : ""}" data-filter="unmapped">Non mappés</button>
+          <button type="button" class="chip filter-chip${activeMapping === "mapped" ? " is-active" : ""}" data-filter="mapped">Mappés</button>
+          <button type="button" class="chip filter-chip${activePrice === "with_price" ? " is-active" : ""}" data-filter="with_price">Avec prix</button>
+          <button type="button" class="chip filter-chip${activePrice === "without_price" ? " is-active" : ""}" data-filter="without_price">Sans prix</button>
           ${supplierFilters}
         </div>
         <div class="map-bulk">
+          <label class="map-select-page">
+            <input type="checkbox" class="map-select-page-all" />
+            Sélectionner les ${formatInt(Math.min(pageSize, rows.length))} lignes de cette page
+          </label>
           <button type="button" class="button secondary" id="map-bulk-apply" disabled>
             Associer le Product aux lignes cochées
           </button>
@@ -279,15 +377,16 @@
     </article>`;
   }
 
-  function renderMappingWorkspace(rows) {
+  function renderMappingWorkspace(rows, meta = null) {
     currentRows = rows;
+    mappingPageMeta = meta;
     rows.forEach((row) => {
       const key = mapKey(row.supplier, row.external_reference);
       if (!previewMappings.has(key)) previewMappings.set(key, row.product_id ?? null);
     });
     return `
       <div class="map-workspace" data-map-workspace>
-        ${renderToolbar(rows)}
+        ${renderToolbar(rows, meta)}
         <div class="map-desktop-wrap">
           <table class="admin-table map-table">
             <thead>
@@ -306,6 +405,7 @@
           </table>
         </div>
         <div class="map-cards">${rows.map(renderRowCard).join("")}</div>
+        ${renderPaginationNav(meta)}
         <p class="muted admin-mapping-note">
           Aucune association automatique. Plusieurs références peuvent viser le même Product.
           Cochez des lignes puis « Associer… » pour un mapping groupé explicite.
@@ -397,15 +497,112 @@
   }
 
   function updateCounters(workspace) {
+    if (mode === "catalog" && mappingPageMeta) {
+      const box = workspace.querySelector("[data-map-counters]");
+      if (!box) return;
+      const c = catalogCountersFromMeta(mappingPageMeta);
+      box.innerHTML = `<strong>${formatInt(c.total)}</strong> références ·
+      <strong>${formatInt(c.mapped)}</strong> mappée(s) ·
+      <strong>${formatInt(c.todo)}</strong> à traiter`;
+      return;
+    }
     const c = countsFor(currentRows);
     const box = workspace.querySelector("[data-map-counters]");
     if (!box) return;
-    box.innerHTML = `<strong>${c.total}</strong> références ·
-      <strong>${c.mapped}</strong> mappée(s) ·
-      <strong>${c.todo}</strong> à traiter`;
+    box.innerHTML = `<strong>${formatInt(c.total)}</strong> références ·
+      <strong>${formatInt(c.mapped)}</strong> mappée(s) ·
+      <strong>${formatInt(c.todo)}</strong> à traiter`;
+  }
+
+  function syncMappingUrl() {
+    if (mode !== "catalog" || !mappingState.catalogId) return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("catalog", String(mappingState.catalogId));
+    params.set("page", String(mappingState.page));
+    params.set("page_size", String(mappingState.pageSize));
+    if (mappingState.q) params.set("q", mappingState.q);
+    else params.delete("q");
+    if (mappingState.mapping !== "all") params.set("mapping", mappingState.mapping);
+    else params.delete("mapping");
+    if (mappingState.price !== "all") params.set("price", mappingState.price);
+    else params.delete("price");
+    if (mappingState.supplier) params.set("supplier", mappingState.supplier);
+    else params.delete("supplier");
+    const next = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState({}, "", next);
+  }
+
+  function mappingQueryString() {
+    const params = new URLSearchParams();
+    params.set("page", String(mappingState.page));
+    params.set("page_size", String(mappingState.pageSize));
+    if (mappingState.q) params.set("q", mappingState.q);
+    if (mappingState.mapping !== "all") params.set("mapping", mappingState.mapping);
+    if (mappingState.price !== "all") params.set("price", mappingState.price);
+    if (mappingState.supplier) params.set("supplier", mappingState.supplier);
+    return params.toString();
+  }
+
+  function rowsFromMappingPayload(data) {
+    return (data.items || []).map((item) => ({
+      supplier: item.supplier,
+      external_reference: item.external_reference,
+      name: item.name,
+      brand: item.brand,
+      supplier_unit: item.supplier_unit,
+      packaging_quantity: item.packaging_quantity,
+      reference_unit: item.reference_unit,
+      reference_quantity: item.reference_quantity,
+      price: item.price,
+      tax_basis: item.tax_basis,
+      vat_rate: item.vat_rate,
+      image_url: item.image_url,
+      product_id: item.product_id,
+      product_code: item.product_code,
+      product_name: item.product_name,
+      product_reference_unit: item.product_reference_unit,
+      product_attributes: item.product_attributes,
+      unit_compatible: item.unit_compatible,
+      unit_anomaly: item.unit_anomaly,
+      correction_source: item.correction_source,
+      supplier_product_id: item.supplier_product_id,
+    }));
+  }
+
+  async function loadCatalogMappingsPage({ resetPreviewMap = false } = {}) {
+    if (!mappingState.catalogId) return;
+    mappingPanel.innerHTML = "<p>Chargement…</p>";
+    syncMappingUrl();
+    const res = await fetch(
+      `/api/supplier-catalogs/${mappingState.catalogId}/mappings?${mappingQueryString()}`
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      mappingPanel.innerHTML = `<p class="error">${esc(formatDetail(data.detail || data))}</p>`;
+      return;
+    }
+    if (
+      mappingState.mapping === "unmapped" &&
+      (data.items || []).length === 0 &&
+      (data.pages || 0) >= 1 &&
+      mappingState.page > 1
+    ) {
+      mappingState.page = Math.min(mappingState.page - 1, data.pages || 1);
+      return loadCatalogMappingsPage({ resetPreviewMap });
+    }
+    catalogContext = data;
+    mappingMeta.textContent = `${data.filename} · ${data.source_key}`;
+    if (resetPreviewMap) previewMappings = new Map();
+    mappingState.page = data.page;
+    mappingState.pageSize = data.page_size;
+    const rows = rowsFromMappingPayload(data);
+    mappingPanel.innerHTML = renderMappingWorkspace(rows, data);
+    const workspace = mappingPanel.querySelector("[data-map-workspace]");
+    if (workspace) bindWorkspace(workspace);
   }
 
   function applyFilters(workspace) {
+    if (mode === "catalog") return;
     const filter =
       workspace.querySelector(".filter-chip.is-active")?.dataset.filter || "all";
     const query = (workspace.querySelector(".map-filter-search")?.value || "")
@@ -452,12 +649,15 @@
           const res = await fetch(`/api/supplier-products/${spId}/mapping`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_id: id }),
+            body: JSON.stringify({ product_id: id, confirm_remap: true }),
           });
           if (!res.ok) {
             const body = await res.json().catch(() => ({}));
             window.alert(formatDetail(body.detail || body));
+            return;
           }
+          await loadCatalogMappingsPage();
+          return;
         }
         // Sync twin row/card picker
         workspace.querySelectorAll(`.product-picker[data-map-key="${CSS.escape(rowKey)}"]`).forEach((other) => {
@@ -516,22 +716,96 @@
 
   function bindWorkspace(workspace) {
     bindProductPickers(workspace);
+    let searchTimer = null;
     workspace.querySelectorAll(".filter-chip").forEach((chip) => {
       chip.addEventListener("click", () => {
+        if (mode === "catalog") {
+          const kind = chip.dataset.filter;
+          if (kind === "all") {
+            mappingState.mapping = "all";
+            mappingState.price = "all";
+            mappingState.supplier = "";
+          } else if (kind === "mapped" || kind === "unmapped") {
+            mappingState.mapping = kind;
+            mappingState.price = "all";
+            mappingState.supplier = "";
+          } else if (kind === "with_price" || kind === "without_price") {
+            mappingState.price = kind;
+            mappingState.mapping = "all";
+            mappingState.supplier = "";
+          } else if (kind === "supplier") {
+            mappingState.supplier = chip.dataset.supplier || "";
+            mappingState.mapping = "all";
+            mappingState.price = "all";
+          }
+          mappingState.page = 1;
+          loadCatalogMappingsPage();
+          return;
+        }
         workspace.querySelectorAll(".filter-chip").forEach((c) => c.classList.remove("is-active"));
         chip.classList.add("is-active");
         applyFilters(workspace);
       });
     });
-    workspace.querySelector(".map-filter-search")?.addEventListener("input", () => {
+    workspace.querySelector(".map-filter-search")?.addEventListener("input", (event) => {
+      if (mode === "catalog") {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          mappingState.q = String(event.target.value || "").trim();
+          mappingState.page = 1;
+          loadCatalogMappingsPage();
+        }, 250);
+        return;
+      }
       applyFilters(workspace);
+    });
+    workspace.querySelectorAll("[data-map-pagination]").forEach((nav) => {
+      nav.addEventListener("click", (event) => {
+        const btn = event.target.closest("button");
+        if (!btn || mode !== "catalog") return;
+        const meta = mappingPageMeta || {};
+        const pages = meta.pages || 1;
+        if (btn.classList.contains("map-page-prev") && mappingState.page > 1) {
+          mappingState.page -= 1;
+          loadCatalogMappingsPage();
+        } else if (btn.classList.contains("map-page-next") && mappingState.page < pages) {
+          mappingState.page += 1;
+          loadCatalogMappingsPage();
+        } else if (btn.classList.contains("map-page-btn")) {
+          const next = Number(btn.dataset.page);
+          if (next >= 1 && next <= pages && next !== mappingState.page) {
+            mappingState.page = next;
+            loadCatalogMappingsPage();
+          }
+        } else if (btn.classList.contains("map-page-size-btn")) {
+          const nextSize = Number(btn.dataset.setPageSize) || 50;
+          if (nextSize !== mappingState.pageSize) {
+            mappingState.pageSize = nextSize;
+            mappingState.page = 1;
+            loadCatalogMappingsPage();
+          }
+        }
+      });
     });
 
     const bulkBtn = workspace.querySelector("#map-bulk-apply");
+    const pageAll = workspace.querySelector(".map-select-page-all");
     const syncBulk = () => {
-      const n = workspace.querySelectorAll(".map-select:checked").length;
+      const boxes = [...workspace.querySelectorAll(".map-row .map-select, .map-card .map-select")];
+      const n = boxes.filter((cb) => cb.checked).length;
       if (bulkBtn) bulkBtn.disabled = n === 0;
+      if (pageAll) {
+        pageAll.checked = boxes.length > 0 && n === boxes.length;
+        pageAll.indeterminate = n > 0 && n < boxes.length;
+      }
     };
+    pageAll?.addEventListener("change", () => {
+      const on = pageAll.checked;
+      workspace.querySelectorAll(".map-row .map-select, .map-card .map-select").forEach((cb) => {
+        cb.checked = on;
+      });
+      syncBulk();
+    });
     workspace.addEventListener("change", (event) => {
       if (event.target.classList.contains("map-select")) syncBulk();
     });
@@ -571,13 +845,14 @@
             fetch(`/api/supplier-products/${spId}/mapping`, {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ product_id: exact.id }),
+              body: JSON.stringify({ product_id: exact.id, confirm_remap: true }),
             });
           }
         });
       }
       updateCounters(workspace);
       window.alert(`${uniqueKeys.length} référence(s) associées à ${exact.code}.`);
+      if (mode === "catalog") await loadCatalogMappingsPage();
     });
 
     const dialog = workspace.querySelector("#map-create-dialog");
@@ -743,7 +1018,7 @@
           return;
         }
         editDialog.close();
-        if (catalogContext?.catalog_id) await openCatalogMappings(catalogContext.catalog_id);
+        if (mode === "catalog" && mappingState.catalogId) await loadCatalogMappingsPage();
         return;
       }
       const fd = new FormData(editForm);
@@ -770,7 +1045,7 @@
         return;
       }
       editDialog.close();
-      if (catalogContext?.catalog_id) await openCatalogMappings(catalogContext.catalog_id);
+      if (mode === "catalog" && mappingState.catalogId) await loadCatalogMappingsPage();
       else window.alert("Conditionnement enregistré (override manuel).");
     });
   }
@@ -882,46 +1157,34 @@
     }
   }
 
-  async function openCatalogMappings(catalogId) {
+  async function openCatalogMappings(catalogId, opts = {}) {
     mode = "catalog";
     mappingSection.hidden = false;
-    mappingPanel.innerHTML = "<p>Chargement…</p>";
-    const res = await fetch(`/api/supplier-catalogs/${catalogId}/mappings`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      mappingPanel.innerHTML = `<p class="error">${esc(formatDetail(data.detail || data))}</p>`;
-      return;
-    }
-    catalogContext = data;
-    mappingMeta.textContent = `${data.filename} · ${data.source_key}`;
-    previewMappings = new Map();
-    const rows = (data.items || []).map((item) => ({
-      supplier: item.supplier,
-      external_reference: item.external_reference,
-      name: item.name,
-      brand: item.brand,
-      supplier_unit: item.supplier_unit,
-      packaging_quantity: item.packaging_quantity,
-      reference_unit: item.reference_unit,
-      reference_quantity: item.reference_quantity,
-      price: item.price,
-      tax_basis: item.tax_basis,
-      vat_rate: item.vat_rate,
-      image_url: item.image_url,
-      product_id: item.product_id,
-      product_code: item.product_code,
-      product_name: item.product_name,
-      product_reference_unit: item.product_reference_unit,
-      product_attributes: item.product_attributes,
-      unit_compatible: item.unit_compatible,
-      unit_anomaly: item.unit_anomaly,
-      correction_source: item.correction_source,
-      supplier_product_id: item.supplier_product_id,
-    }));
-    mappingPanel.innerHTML = renderMappingWorkspace(rows);
-    const workspace = mappingPanel.querySelector("[data-map-workspace]");
-    if (workspace) bindWorkspace(workspace);
+    mappingState = {
+      catalogId: Number(catalogId),
+      page: Number(opts.page) || 1,
+      pageSize: Number(opts.pageSize) || 50,
+      q: opts.q || "",
+      mapping: opts.mapping || "all",
+      price: opts.price || "all",
+      supplier: opts.supplier || "",
+    };
+    await loadCatalogMappingsPage({ resetPreviewMap: true });
     mappingSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function restoreMappingFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const catalogId = params.get("catalog");
+    if (!catalogId) return;
+    openCatalogMappings(catalogId, {
+      page: params.get("page") || 1,
+      pageSize: params.get("page_size") || 50,
+      q: params.get("q") || "",
+      mapping: params.get("mapping") || "all",
+      price: params.get("price") || "all",
+      supplier: params.get("supplier") || "",
+    });
   }
 
   async function catalogAction(url, method, okMessage) {
@@ -946,7 +1209,15 @@
     const id = target.dataset.id;
     if (!id) return;
     try {
-      if (target.classList.contains("catalog-map")) await openCatalogMappings(id);
+      if (target.classList.contains("supplier-activate"))
+        await catalogAction(`/api/suppliers/${id}/activate`, "POST", "Fournisseur activé.");
+      else if (target.classList.contains("supplier-deactivate"))
+        await catalogAction(
+          `/api/suppliers/${id}/deactivate`,
+          "POST",
+          "Fournisseur désactivé. Il ne participera plus aux nouvelles comparaisons."
+        );
+      else if (target.classList.contains("catalog-map")) await openCatalogMappings(id);
       else if (target.classList.contains("catalog-activate"))
         await catalogAction(`/api/supplier-catalogs/${id}/activate`, "POST", "Catalogue activé.");
       else if (target.classList.contains("catalog-deactivate"))
@@ -961,4 +1232,6 @@
       window.alert(err.message || "Erreur");
     }
   });
+
+  restoreMappingFromUrl();
 })();

@@ -13,6 +13,7 @@ _STATEMENTS = (
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_legacy BOOLEAN DEFAULT FALSE",
     "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) DEFAULT 'demo'",
     "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS source_key VARCHAR(80)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE agencies ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
     "ALTER TABLE agencies ALTER COLUMN latitude DROP NOT NULL",
     "ALTER TABLE agencies ALTER COLUMN longitude DROP NOT NULL",
@@ -89,6 +90,17 @@ def ensure_schema(engine: Engine) -> None:
         connection.execute(
             text(
                 """
+                UPDATE suppliers
+                SET active = TRUE
+                WHERE active IS NULL
+                """
+            )
+        )
+        connection.execute(text("ALTER TABLE suppliers ALTER COLUMN active SET DEFAULT TRUE"))
+        connection.execute(text("ALTER TABLE suppliers ALTER COLUMN active SET NOT NULL"))
+        connection.execute(
+            text(
+                """
                 UPDATE products
                 SET is_active = TRUE
                 WHERE is_active IS NULL
@@ -118,7 +130,11 @@ def _ensure_sqlite(engine: Engine) -> None:
                 ("is_active", "BOOLEAN DEFAULT 1"),
                 ("is_legacy", "BOOLEAN DEFAULT 0"),
             ),
-            "suppliers": (("source_type", "VARCHAR(20) DEFAULT 'demo'"), ("source_key", "VARCHAR(80)")),
+            "suppliers": (
+                ("source_type", "VARCHAR(20) DEFAULT 'demo'"),
+                ("source_key", "VARCHAR(80)"),
+                ("active", "BOOLEAN NOT NULL DEFAULT 1"),
+            ),
             "agencies": (("external_id", "VARCHAR(80)"),),
             "supplier_products": (
                 ("brand", "VARCHAR(80)"),

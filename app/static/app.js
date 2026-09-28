@@ -569,6 +569,28 @@ function isLiveAgencyKey(agencyKey) {
   return !key.startsWith("db:");
 }
 
+function liveAgoLabel(iso) {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return "";
+  const mins = Math.max(0, Math.round(ms / 60000));
+  if (mins < 1) return "à l'instant";
+  if (mins < 60) return `il y a ${mins} min`;
+  const hours = Math.round(mins / 60);
+  return `il y a ${hours} h`;
+}
+
+function liveOfferNote(line) {
+  const at = line.fetched_at || line.updated_at;
+  const when = at ? liveAgoLabel(at) : "";
+  if (line.live_status === "stale") {
+    return when
+      ? `Prix et stock non actualisés · dernière valeur ${when}`
+      : "Prix et stock non actualisés";
+  }
+  if (when) return `Prix et stock actualisés ${when}`;
+  return "Prix et stock live";
+}
+
 function comparisonHasLiveOffers(data) {
   for (const strategy of data.strategies || []) {
     for (const stop of strategy.stops || []) {
@@ -687,6 +709,66 @@ function comparisonTaxHintLabel(data) {
   return `Données de comparaison · EUR ${taxLabel}`;
 }
 
+function solutionCoverage(option) {
+  const lines = option.lines || option.available || [];
+  const unavailable = option.unavailable || [];
+  const hasCounts = Number(option.lines_requested) > 0;
+  const requested = hasCounts
+    ? Number(option.lines_requested)
+    : lines.length + unavailable.length;
+  const available = hasCounts
+    ? Number(option.lines_available)
+    : lines.filter((line) => !line.availability || line.availability === "available").length;
+  const partial = hasCounts
+    ? Number(option.lines_partial)
+    : lines.filter((line) => line.availability === "partial").length;
+  const missing = hasCounts
+    ? Number(option.lines_unavailable)
+    : unavailable.length;
+  const pct = requested ? Math.round((100 * available) / requested) : 0;
+  return { requested, available, partial, missing, pct };
+}
+
+function appendPurchasableLine(parent, line, taxLabel) {
+  const detail = node("div", undefined, "detail-line detail-line-product");
+  const refUnit = line.reference_unit || "pièce";
+  const partial = line.availability === "partial";
+  const delayed = line.availability === "delayed";
+  const onOrder = line.availability === "order_only";
+  const mark = partial ? "◐" : delayed ? "◷" : onOrder ? "…" : "✓";
+  detail.append(node("strong", `${mark} ${line.product_name}`));
+  if (delayed) detail.append(node("p", "Sous 10 jours"));
+  if (onOrder) detail.append(node("p", "Sur commande"));
+  if (partial) {
+    const have = Number(line.purchased_quantity);
+    const need = Number(line.requested_quantity);
+    const missing = line.missing_quantity != null ? Number(line.missing_quantity) : need - have;
+    detail.append(
+      node("p", `${number(have)} disponibles sur ${number(need)} ${refUnit}`),
+      node("p", `Manquant : ${number(missing)} ${refUnit}`),
+    );
+  }
+  if (line.line_total != null) {
+    detail.append(
+      node(
+        "p",
+        `${money(line.line_total)} ${line.tax_basis || taxLabel}`,
+      ),
+    );
+  }
+  parent.append(detail);
+}
+
+function appendUnavailableLine(parent, line) {
+  const detail = node("div", undefined, "detail-line");
+  const label =
+    line.availability === "out_of_stock"
+      ? "Indisponible dans ce dépôt"
+      : line.reason || "Aucune offre exploitable";
+  detail.append(node("strong", `✕ ${line.product_name}`), node("p", label));
+  parent.append(detail);
+}
+
 function renderStrategy(option) {
   const card = node(
     "article",
@@ -702,23 +784,84 @@ function renderStrategy(option) {
     node("div", labels[option.key], "card-label"),
     node("h3", option.title),
   );
+  const coverage = solutionCoverage(option);
   card.append(
     node(
       "span",
-      option.valid ? "Panier complet disponible" : "Solution indisponible",
+      option.valid
+        ? "Panier complet disponible"
+        : `${coverage.available}/${coverage.requested} — ${coverage.pct} %`,
       `badge ${option.valid ? "" : "warning"}`,
     ),
   );
   if (!option.valid) {
-    card.append(node("p", option.explanation, "unavailable-description"));
+    const taxLabel = lastComparison?.tax_basis || "HT";
+    card.append(
+      node(
+        "p",
+        `${coverage.available}/${coverage.requested} références disponibles`,
+      ),
+    );
+    if (coverage.missing) {
+      card.append(
+        node(
+          "p",
+          `${coverage.missing} référence${coverage.missing > 1 ? "s" : ""} indisponible${coverage.missing > 1 ? "s" : ""}`,
+        ),
+      );
+    }
+    if (coverage.partial) {
+      card.append(
+        node(
+          "p",
+          `${coverage.partial} référence${coverage.partial > 1 ? "s" : ""} en stock partiel`,
+        ),
+      );
+    }
+    const strategyLines = option.lines || option.available || [];
+    const delayedCount = strategyLines.filter((line) => line.availability === "delayed").length;
+    const orderCount = strategyLines.filter((line) => line.availability === "order_only").length;
+    if (delayedCount) {
+      card.append(
+        node("p", `${delayedCount} référence${delayedCount > 1 ? "s" : ""} sous 10 jours`),
+      );
+    }
+    if (orderCount) {
+      card.append(
+        node("p", `${orderCount} référence${orderCount > 1 ? "s" : ""} sur commande`),
+      );
+    }
+    if (
+      coverage.available + coverage.partial + delayedCount + orderCount > 0 &&
+      option.available_subtotal != null
+    ) {
+      card.append(
+        node(
+          "p",
+          `Total disponible : ${money(option.available_subtotal)} ${taxLabel}`,
+          "price",
+        ),
+        node("p", "Ce montant ne couvre pas 100 % du besoin.", "muted"),
+      );
+    }
+    if (option.explanation) {
+      card.append(node("p", option.explanation, "unavailable-description"));
+    }
     const details = node("details");
+    details.open = true;
     details.append(node("summary", "Disponibilité des produits"));
-    option.unavailable.forEach((line) => {
-      const item = node("div", undefined, "detail-line");
-      item.append(node("strong", line.product_name), node("p", line.reason));
-      details.append(item);
-    });
+    (option.lines || []).forEach((line) => appendPurchasableLine(details, line, taxLabel));
+    (option.unavailable || []).forEach((line) => appendUnavailableLine(details, line));
     card.append(details);
+    if (loadedChantier && ((option.lines || []).length || (option.unavailable || []).length)) {
+      const actions = node("div", undefined, "strategy-choose");
+      const choose = node("button", "Choisir cette solution", "button primary");
+      choose.type = "button";
+      choose.dataset.strategyKey = option.key;
+      choose.addEventListener("click", () => openChoiceConfirm(option));
+      actions.append(choose);
+      card.append(actions);
+    }
     return card;
   }
   const stops = option.stops || [];
@@ -738,16 +881,29 @@ function renderStrategy(option) {
     }
     return false;
   };
-  const stopHeadline = (s) =>
-    isNationalCatalogStop(s)
-      ? `${formatSupplierDisplayName(s.supplier)} — Catalogue national`
-      : `${s.name} (${formatSupplierDisplayName(s.supplier)})`;
+  const stopHeadline = (s) => {
+    if (isNationalCatalogStop(s)) {
+      return `${formatSupplierDisplayName(s.supplier)} — Catalogue national`;
+    }
+    if (String(s.agency_key || "").startsWith("gedimat:")) {
+      const km = s.distance_km != null ? ` · ${number(s.distance_km)} km` : "";
+      return `GEDIMAT — ${s.name}${km}`;
+    }
+    return `${s.name} (${formatSupplierDisplayName(s.supplier)})`;
+  };
   const agencies = node(
     "p",
     stops.map(stopHeadline).join(" → ") || "Catalogue national (sans magasin)",
     "selected-agencies",
   );
   card.append(agencies);
+  card.append(
+    node(
+      "p",
+      `${coverage.available}/${coverage.requested} — ${coverage.pct} %`,
+      "muted",
+    ),
+  );
   const taxLabel = lastComparison?.tax_basis || "HT";
   const price = node("p", money(option.material_total), "price");
   price.append(node("small", ` ${taxLabel} matériaux`));
@@ -891,7 +1047,10 @@ function renderStrategy(option) {
       );
     } else {
       productsBlock.append(
-        node("h4", stop.name),
+        node(
+          "h4",
+          String(stop.agency_key || "").startsWith("gedimat:") ? stopHeadline(stop) : stop.name,
+        ),
         agencyAddressParagraph(stop),
       );
     }
@@ -924,7 +1083,10 @@ function renderStrategy(option) {
             : `${packs} ${unitLabel(packs, supplierUnit)} × ${number(refPerPack)} ${refUnit}`;
         detail.append(
           productThumb(line.image_url, line.product_name),
-          node("strong", line.product_name),
+          node(
+            "strong",
+            `${line.availability === "partial" ? "◐" : line.availability === "delayed" ? "◷" : line.availability === "order_only" ? "…" : "✓"} ${line.product_name}`,
+          ),
           node("p", `Besoin : ${number(line.requested_quantity)} ${refUnit}`),
           node("p", `Achat : ${purchase}`),
           node(
@@ -936,6 +1098,22 @@ function renderStrategy(option) {
             `${money(line.pack_price)} ${lineTax} / ${supplierUnit} · Total ${money(line.line_total)} ${lineTax}`,
           ),
         );
+        if (line.availability === "delayed") {
+          detail.append(node("p", "Sous 10 jours — pas un retrait immédiat"));
+        }
+        if (line.availability === "order_only") {
+          detail.append(node("p", "Sur commande — pas un retrait immédiat"));
+        }
+        if (line.availability === "partial") {
+          const have = Number(line.purchased_quantity);
+          const need = Number(line.requested_quantity);
+          const missing =
+            line.missing_quantity != null ? Number(line.missing_quantity) : need - have;
+          detail.append(
+            node("p", `${number(have)} disponibles sur ${number(need)} ${refUnit}`),
+            node("p", `Manquant : ${number(missing)} ${refUnit}`),
+          );
+        }
         if (line.source_price != null && line.source_tax_basis) {
           detail.append(
             node(
@@ -958,7 +1136,7 @@ function renderStrategy(option) {
           ),
         );
         if (isLiveAgencyKey(line.agency_key) || isLiveAgencyKey(stop.agency_key)) {
-          detail.append(node("p", "Prix et stock live", "muted offer-source-live"));
+          detail.append(node("p", liveOfferNote(line), "muted offer-source-live"));
         }
         detail.append(
           node(
@@ -1014,20 +1192,33 @@ function renderComparison(data) {
       detail.append(
         node(
           "summary",
-          `${formatOptionTitle(option.title)} · ${option.valid ? money(option.total) + " " + taxLabel : "Panier incomplet"}`,
+          `${formatOptionTitle(option.title)} · ${
+            option.valid
+              ? money(option.total) + " " + taxLabel
+              : `${solutionCoverage(option).available}/${solutionCoverage(option).requested} références`
+          }`,
         ),
         node(
           "p",
           `${option.agency_count} arrêt(s) · Préparation max. ${option.max_preparation_minutes} min · ${option.available.length} ligne(s) disponible(s)`,
         ),
       );
-      if (!option.valid)
-        detail.append(
-          node(
-            "p",
-            `Sous-total disponible : ${money(option.available_subtotal)} ${taxLabel}`,
-          ),
-        );
+      if (!option.valid) {
+        const cov = solutionCoverage(option);
+        if (cov.available + cov.partial > 0) {
+          detail.append(
+            node(
+              "p",
+              `Total disponible : ${money(option.available_subtotal)} ${taxLabel} · ${cov.available}/${cov.requested} — ${cov.pct} %`,
+            ),
+          );
+        } else {
+          detail.append(
+            node("p", `${cov.available}/${cov.requested} — ${cov.pct} % · aucune référence achetable`),
+          );
+        }
+        (option.unavailable || []).forEach((line) => appendUnavailableLine(detail, line));
+      }
       option.available.forEach((line) =>
         detail.append(
           node(
@@ -1035,9 +1226,6 @@ function renderComparison(data) {
             `${line.product_name} · ${line.packs} × ${line.supplier_unit} · ${money(line.line_total)} ${line.tax_basis || taxLabel} · ${findAgencyForLine(option.agencies, line)?.name || "—"}`,
           ),
         ),
-      );
-      option.unavailable.forEach((line) =>
-        detail.append(node("p", `${line.product_name} : ${line.reason}`)),
       );
       return detail;
     }),
@@ -1228,7 +1416,11 @@ $("origin-address")?.addEventListener("input", () => {
 });
 
 async function openChoiceConfirm(option) {
-  if (!loadedChantier || !lastComparison || !option?.valid) return;
+  const choosable =
+    option?.valid ||
+    (option?.lines || []).length > 0 ||
+    (option?.unavailable || []).length > 0;
+  if (!loadedChantier || !lastComparison || !choosable) return;
   if (!comparisonFingerprint || materialsFingerprint(cart) !== comparisonFingerprint) {
     status(STALE_COMPARISON_MESSAGE, true);
     return;
@@ -1253,6 +1445,24 @@ async function openChoiceConfirm(option) {
   const taxLabel = lastComparison?.tax_basis || "HT";
   body.append(node("p", option.title, "choice-strategy"));
   if (agencies) body.append(node("p", agencies));
+  const choiceCoverage = solutionCoverage(option);
+  if (!option.valid) {
+    body.append(
+      node(
+        "p",
+        `${choiceCoverage.available}/${choiceCoverage.requested} références disponibles · ${choiceCoverage.missing} indisponible(s). Les lignes indisponibles restent dans le chantier, non satisfaites.`,
+      ),
+    );
+    if (choiceCoverage.available + choiceCoverage.partial > 0 && option.available_subtotal != null) {
+      body.append(
+        node(
+          "p",
+          `Total disponible : ${money(option.available_subtotal)} ${taxLabel}`,
+          "choice-total",
+        ),
+      );
+    }
+  }
   if (option.estimated_procurement_cost != null) {
     body.append(
       node(
@@ -1261,7 +1471,7 @@ async function openChoiceConfirm(option) {
         "choice-total",
       ),
     );
-  } else if (option.material_total != null) {
+  } else if (option.valid && option.material_total != null) {
     body.append(
       node(
         "p",

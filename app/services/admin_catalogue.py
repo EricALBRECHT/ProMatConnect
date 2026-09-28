@@ -2,26 +2,35 @@
 
 from __future__ import annotations
 
+import re
+import secrets
 from decimal import Decimal
 from math import ceil
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Agency, Offer, Product, Supplier, SupplierProduct
 from app.repositories.catalog import CatalogRepository
 from app.schemas.admin_catalogue import (
     CatalogueOfferView,
+    CatalogueProductCreate,
     CatalogueProductDetail,
     CatalogueProductListItem,
     CatalogueProductListResponse,
     CatalogueProductUpdate,
+    CatalogueReferenceSearchItem,
+    CatalogueReferenceSearchResponse,
+    CatalogueSupplierOption,
     CatalogueSupplierProductView,
     CatalogueUnmappedItem,
     CatalogueUnmappedResponse,
 )
+from app.schemas.catalog import ProductCreate
 from app.services.tax import display_converted
 from app.services.units import ALLOWED_PRODUCT_UNITS, units_compatible
+
+_MANUAL_CODE = re.compile(r"^PMC-[A-Z0-9-]+$")
 
 
 def _dec(value) -> Decimal | None:
@@ -42,6 +51,15 @@ class AdminCatalogueService:
         self.session = session
         self.catalog = CatalogRepository(session)
 
+    def list_active_suppliers(self) -> list[CatalogueSupplierOption]:
+        """Fournisseurs actifs pour le filtre Admin Catalogue (tri nom)."""
+        return [
+            CatalogueSupplierOption(id=row.id, name=row.name, active=True)
+            for row in self.session.scalars(
+                select(Supplier).where(Supplier.active.is_(True)).order_by(Supplier.name)
+            )
+        ]
+
     def list_products(
         self,
         *,
@@ -52,6 +70,7 @@ class AdminCatalogueService:
         mapping: str = "all",  # all | mapped | unmapped
         anomaly: str = "all",  # all | with | without
         has_price: str = "all",  # all | with | without
+        supplier: str | None = None,  # None | "<supplier_id>"
         page: int = 1,
         page_size: int = 25,
     ) -> CatalogueProductListResponse:
@@ -76,6 +95,17 @@ class AdminCatalogueService:
                     Product.code.icontains(q, autoescape=True),
                     Product.category.icontains(q, autoescape=True),
                     Product.subcategory.icontains(q, autoescape=True),
+                )
+            )
+        supplier_key = (supplier or "").strip()
+        if supplier_key.isdigit():
+            supplier_id = int(supplier_key)
+            statement = statement.where(
+                exists(
+                    select(1).where(
+                        SupplierProduct.product_id == Product.id,
+                        SupplierProduct.supplier_id == supplier_id,
+                    )
                 )
             )
 
@@ -133,6 +163,8 @@ class AdminCatalogueService:
                 if c
             }
         )
+        # Fournisseurs actifs uniquement — réapparaissent dès qu'ils sont réactivés.
+        suppliers = self.list_active_suppliers()
         unmapped_count = int(
             self.session.scalar(
                 select(func.count())
@@ -156,6 +188,7 @@ class AdminCatalogueService:
             page_size=page_size,
             pages=pages,
             categories=categories,
+            suppliers=suppliers,
             unmapped_count=unmapped_count,
             anomaly_product_count=anomaly_product_count,
             legacy_count=legacy_count,
@@ -300,12 +333,88 @@ class AdminCatalogueService:
             raw = data["description"]
             product.description = (raw or "").strip() or None
         if "attributes" in data:
-            product.attributes = data["attributes"]
+            incoming = data["attributes"]
+            if isinstance(incoming, dict) and "identity_level" not in incoming:
+                previous = product.attributes if isinstance(product.attributes, dict) else {}
+                if previous.get("identity_level"):
+                    incoming = {**incoming, "identity_level": previous["identity_level"]}
+            product.attributes = incoming
         if "is_active" in data and data["is_active"] is not None:
             product.is_active = bool(data["is_active"])
         self.session.commit()
         self.session.refresh(product)
         return self.get_product(product_id)
+
+    def _new_manual_code(self) -> str:
+        for _ in range(8):
+            code = "PMC-MAN-" + secrets.token_hex(4).upper()
+            taken = self.session.scalar(select(Product.id).where(Product.code == code))
+            if taken is None:
+                return code
+        raise ValueError("Impossible de générer un code PMC unique.")
+
+    def create_manual_product(self, payload: CatalogueProductCreate) -> CatalogueProductDetail:
+        raw = (payload.code or "").strip().upper()
+        if raw:
+            if not _MANUAL_CODE.fullmatch(raw):
+                raise ValueError(
+                    "Le code doit commencer par PMC- et ne contenir que des lettres, "
+                    "des chiffres et des tirets. Exemple : PMC-BA13-STD-2600X1200."
+                )
+            code = raw
+        else:
+            code = self._new_manual_code()
+        attributes = dict(payload.attributes or {})
+        attributes["identity_level"] = "manual"
+        created = self.catalog.create(
+            ProductCreate(
+                code=code,
+                name=payload.name,
+                category=payload.category,
+                subcategory=payload.subcategory,
+                reference_unit=payload.reference_unit,
+                description=payload.description,
+                attributes=attributes,
+            )
+        )
+        return self.get_product(created.id)
+
+    def search_references(self, q: str = "", *, limit: int = 20) -> CatalogueReferenceSearchResponse:
+        """Références fournisseur pour association. Sans texte : seulement les non rattachées."""
+        limit = min(max(1, limit), 30)
+        statement = (
+            select(SupplierProduct, Supplier, Product)
+            .join(Supplier, Supplier.id == SupplierProduct.supplier_id)
+            .outerjoin(Product, Product.id == SupplierProduct.product_id)
+        )
+        if q:
+            statement = statement.where(
+                or_(
+                    SupplierProduct.designation.icontains(q, autoescape=True),
+                    SupplierProduct.supplier_reference.icontains(q, autoescape=True),
+                    SupplierProduct.brand.icontains(q, autoescape=True),
+                    SupplierProduct.ean.icontains(q, autoescape=True),
+                    Supplier.name.icontains(q, autoescape=True),
+                )
+            )
+        else:
+            statement = statement.where(SupplierProduct.product_id.is_(None))
+        statement = statement.order_by(Supplier.name, SupplierProduct.supplier_reference).limit(limit)
+        items: list[CatalogueReferenceSearchItem] = []
+        for sp, supplier, product in self.session.execute(statement):
+            items.append(
+                CatalogueReferenceSearchItem(
+                    supplier_product_id=sp.id,
+                    supplier=supplier.name,
+                    supplier_reference=sp.supplier_reference,
+                    designation=sp.designation,
+                    brand=sp.brand,
+                    current_product_id=product.id if product is not None else None,
+                    current_product_code=product.code if product is not None else None,
+                    current_product_name=product.name if product is not None else None,
+                )
+            )
+        return CatalogueReferenceSearchResponse(items=items)
 
     def list_unmapped(
         self, *, q: str = "", page: int = 1, page_size: int = 25

@@ -29,6 +29,8 @@ router = APIRouter(prefix="/api")
 class SupplierProductMappingUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     product_id: int | None = None
+    # Obligatoire pour déplacer une référence déjà rattachée à un autre Product.
+    confirm_remap: bool = False
 
 
 class ProductUnitUpdate(BaseModel):
@@ -342,9 +344,26 @@ def supplier_catalogs(session: SessionDependency):
 
 
 @router.get("/supplier-catalogs/{catalog_id}/mappings", tags=["Imports fournisseurs"])
-def catalog_mappings(catalog_id: int, session: SessionDependency):
+def catalog_mappings(
+    catalog_id: int,
+    session: SessionDependency,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    q: str = Query("", max_length=100),
+    mapping: str = Query("all", pattern="^(all|mapped|unmapped)$"),
+    price: str = Query("all", pattern="^(all|with_price|without_price)$"),
+    supplier: str | None = Query(None, max_length=100),
+):
     try:
-        return SupplierImportService(session).list_catalog_mappings(catalog_id)
+        return SupplierImportService(session).list_catalog_mappings(
+            catalog_id,
+            page=page,
+            page_size=page_size,
+            q=q,
+            mapping=mapping,
+            price=price,
+            supplier=supplier,
+        )
     except LookupError as error:
         raise HTTPException(404, str(error)) from error
 
@@ -361,8 +380,31 @@ def set_supplier_product_mapping(
     """Définit ou efface (product_id: null) le mapping d'une référence fournisseur."""
     try:
         return SupplierImportService(session).set_supplier_product_mapping(
-            supplier_product_id, payload.product_id
+            supplier_product_id,
+            payload.product_id,
+            confirm_remap=payload.confirm_remap,
         )
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(
+            409,
+            {"code": "remap_confirmation_required", "message": str(error)},
+        ) from error
+
+
+@router.post("/suppliers/{supplier_id}/activate", tags=["Imports fournisseurs"])
+def activate_supplier(supplier_id: int, session: SessionDependency):
+    try:
+        return SupplierImportService(session).set_supplier_active(supplier_id, True)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+
+
+@router.post("/suppliers/{supplier_id}/deactivate", tags=["Imports fournisseurs"])
+def deactivate_supplier(supplier_id: int, session: SessionDependency):
+    try:
+        return SupplierImportService(session).set_supplier_active(supplier_id, False)
     except LookupError as error:
         raise HTTPException(404, str(error)) from error
 

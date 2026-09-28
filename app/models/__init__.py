@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -55,6 +56,10 @@ class Supplier(Timestamps, Base):
     # Provenance dominante du fournisseur : demo | file | api
     source_type: Mapped[str] = mapped_column(String(20), default="demo")
     source_key: Mapped[str | None] = mapped_column(String(80), default=None)
+    # Participation aux nouvelles comparaisons. Distinct de supplier_imports.active.
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
 
 
 class Agency(Timestamps, Base):
@@ -117,8 +122,8 @@ class SupplierProduct(Timestamps, Base):
     introduced_by_catalog_id: Mapped[int | None] = mapped_column(
         Integer, nullable=True, default=None, index=True
     )
-    # None | import | manual | exact_rule
-    # manual / exact_rule : mapping product_id protégé contre réimport.
+    # None | import | manual | exact_rule | specific
+    # manual / exact_rule / specific : mapping product_id protégé contre réimport.
     correction_source: Mapped[str | None] = mapped_column(String(20), default=None)
 
 
@@ -216,3 +221,4 @@ from app.models.product_mapping import (  # noqa: E402
 from app.models.product_mapping import (  # noqa: E402
     SupplierProductFeature as SupplierProductFeature,
 )
+from app.models.gedimat_store import GedimatStore as GedimatStore  # noqa: E402

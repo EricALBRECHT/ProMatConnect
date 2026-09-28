@@ -5,14 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+from math import ceil
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.connectors.file_csv import FileSupplierConnector
 from app.connectors.normalized import NormalizedOffer
 from app.models import Agency, Offer, Product, Supplier, SupplierImport, SupplierProduct
 from app.services.units import normalize_unit, units_compatible
+
+_MAPPING_PAGE_SIZES = frozenset({25, 50, 100, 200})
+_DEFAULT_MAPPING_PAGE_SIZE = 50
 
 
 @dataclass
@@ -357,6 +361,16 @@ class SupplierImportService:
             )
             unmapped = self._catalog_unmapped_count(row.id)
             can_delete, delete_reason = self._deletion_policy(row, live_offers)
+            references = int(
+                self.session.scalar(
+                    select(func.count())
+                    .select_from(SupplierProduct)
+                    .where(SupplierProduct.introduced_by_catalog_id == row.id)
+                )
+                or 0
+            )
+            if references == 0 and live_offers:
+                references = live_offers
             catalogs.append(
                 {
                     "id": row.id,
@@ -369,6 +383,7 @@ class SupplierImportService:
                     "tax_basis": row.tax_basis,
                     "rows": row.rows,
                     "offers": live_offers,
+                    "references": references,
                     "offers_at_import": row.offers,
                     "supplier_references": row.supplier_references,
                     "mapped": row.mapped,
@@ -383,38 +398,156 @@ class SupplierImportService:
     def list_sources(self) -> list[dict]:
         rows = []
         for supplier in self.session.scalars(select(Supplier).order_by(Supplier.name)):
-            last = self.session.scalar(
-                select(func.max(Offer.updated_at)).where(Offer.supplier_id == supplier.id)
+            references = int(
+                self.session.scalar(
+                    select(func.count())
+                    .select_from(SupplierProduct)
+                    .where(SupplierProduct.supplier_id == supplier.id)
+                )
+                or 0
             )
-            offer_count = self.session.scalar(
-                select(func.count()).select_from(Offer).where(Offer.supplier_id == supplier.id)
+            mapped = int(
+                self.session.scalar(
+                    select(func.count())
+                    .select_from(SupplierProduct)
+                    .where(
+                        SupplierProduct.supplier_id == supplier.id,
+                        SupplierProduct.product_id.is_not(None),
+                    )
+                )
+                or 0
             )
             rows.append(
                 {
+                    "id": supplier.id,
                     "name": supplier.name,
                     "source_type": supplier.source_type or "demo",
                     "source_key": supplier.source_key,
-                    "status": "active",
-                    "offers": int(offer_count or 0),
-                    "updated_at": last.isoformat() if last else None,
+                    "active": bool(supplier.active),
+                    "references": references,
+                    "mapped": mapped,
                 }
             )
         return rows
 
-    def list_catalog_mappings(self, catalog_id: int) -> dict:
+    def list_catalog_mappings(
+        self,
+        catalog_id: int,
+        *,
+        page: int = 1,
+        page_size: int = _DEFAULT_MAPPING_PAGE_SIZE,
+        q: str = "",
+        mapping: str = "all",
+        price: str = "all",
+        supplier: str | None = None,
+    ) -> dict:
+        """Références d'un catalogue — filtrage SQL puis pagination serveur."""
         catalog = self.session.get(SupplierImport, catalog_id)
         if catalog is None:
             raise LookupError("Catalogue introuvable.")
-        sps = self._catalog_supplier_products(catalog_id)
-        product_ids = {sp.product_id for sp in sps if sp.product_id is not None}
+        if page_size not in _MAPPING_PAGE_SIZES:
+            page_size = _DEFAULT_MAPPING_PAGE_SIZE
+        page = max(1, int(page or 1))
+        mapping = mapping if mapping in {"all", "mapped", "unmapped"} else "all"
+        price = price if price in {"all", "with_price", "without_price"} else "all"
+        q = (q or "").strip()
+        supplier_name = (supplier or "").strip() or None
+
+        membership = self._catalog_membership(catalog_id)
+        # Compteurs globaux du catalogue (sans filtres UI).
+        catalog_base = select(SupplierProduct.id).where(membership)
+        catalog_total = int(
+            self.session.scalar(select(func.count()).select_from(catalog_base.subquery()))
+            or 0
+        )
+        catalog_mapped = int(
+            self.session.scalar(
+                select(func.count()).select_from(
+                    catalog_base.where(SupplierProduct.product_id.is_not(None)).subquery()
+                )
+            )
+            or 0
+        )
+        catalog_unmapped = int(
+            self.session.scalar(
+                select(func.count()).select_from(
+                    catalog_base.where(SupplierProduct.product_id.is_(None)).subquery()
+                )
+            )
+            or 0
+        )
+
+        filtered_ids = self._catalog_mappings_filter(
+            select(SupplierProduct.id)
+            .join(Supplier, Supplier.id == SupplierProduct.supplier_id)
+            .where(membership),
+            q=q,
+            mapping=mapping,
+            price=price,
+            supplier=supplier_name,
+        )
+        total = int(
+            self.session.scalar(
+                select(func.count()).select_from(filtered_ids.subquery())
+            )
+            or 0
+        )
+        pages = max(1, ceil(total / page_size)) if total else 1
+        if page > pages:
+            page = pages
+        offset = (page - 1) * page_size
+
+        # Compteurs mappé / non mappé hors filtre mapping (même q / prix / fournisseur).
+        status_base = self._catalog_mappings_filter(
+            select(SupplierProduct.id)
+            .join(Supplier, Supplier.id == SupplierProduct.supplier_id)
+            .where(membership),
+            q=q,
+            mapping="all",
+            price=price,
+            supplier=supplier_name,
+        )
+        mapped_count = int(
+            self.session.scalar(
+                select(func.count()).select_from(
+                    status_base.where(SupplierProduct.product_id.is_not(None)).subquery()
+                )
+            )
+            or 0
+        )
+        unmapped_count = int(
+            self.session.scalar(
+                select(func.count()).select_from(
+                    status_base.where(SupplierProduct.product_id.is_(None)).subquery()
+                )
+            )
+            or 0
+        )
+
+        page_stmt = self._catalog_mappings_filter(
+            select(SupplierProduct, Supplier)
+            .join(Supplier, Supplier.id == SupplierProduct.supplier_id)
+            .where(membership),
+            q=q,
+            mapping=mapping,
+            price=price,
+            supplier=supplier_name,
+        ).order_by(
+            Supplier.name,
+            SupplierProduct.supplier_reference,
+            SupplierProduct.id,
+        ).offset(offset).limit(page_size)
+        page_rows = list(self.session.execute(page_stmt))
+
+        product_ids = {sp.product_id for sp, _ in page_rows if sp.product_id is not None}
         names = self._product_names(product_ids)
         codes = self._product_codes(product_ids)
         product_units = self._product_units(product_ids)
         product_attrs = self._product_attributes(product_ids)
-        offers_by_sp = self._latest_offers_for_sps([sp.id for sp in sps])
+        offers_by_sp = self._latest_offers_for_sps([sp.id for sp, _ in page_rows])
+
         items = []
-        for sp in sps:
-            supplier = self.session.get(Supplier, sp.supplier_id)
+        for sp, supplier_row in page_rows:
             p_unit = product_units.get(sp.product_id) if sp.product_id else None
             compatible = (
                 units_compatible(p_unit, sp.reference_unit) if sp.product_id else None
@@ -423,7 +556,7 @@ class SupplierImportService:
             items.append(
                 {
                     "supplier_product_id": sp.id,
-                    "supplier": supplier.name if supplier else "",
+                    "supplier": supplier_row.name if supplier_row else "",
                     "external_reference": sp.supplier_reference,
                     "name": sp.designation,
                     "brand": sp.brand,
@@ -451,22 +584,110 @@ class SupplierImportService:
                     "image_url": sp.image_url,
                 }
             )
+
+        suppliers = list(
+            self.session.scalars(
+                select(Supplier.name)
+                .join(SupplierProduct, SupplierProduct.supplier_id == Supplier.id)
+                .where(membership)
+                .distinct()
+                .order_by(Supplier.name)
+            )
+        )
+        range_start = offset + 1 if total else 0
+        range_end = offset + len(items)
         return {
             "catalog_id": catalog.id,
             "source_key": catalog.source_key,
             "filename": catalog.filename,
             "items": items,
-            "mapped": sum(1 for i in items if i["mapped"]),
-            "unmapped": sum(1 for i in items if not i["mapped"]),
+            "catalog_total": catalog_total,
+            "catalog_mapped": catalog_mapped,
+            "catalog_unmapped": catalog_unmapped,
+            "mapped": mapped_count,
+            "unmapped": unmapped_count,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+            "range_start": range_start,
+            "range_end": range_end,
+            "suppliers": suppliers,
+            "q": q,
+            "mapping": mapping,
+            "price": price,
+            "supplier": supplier_name,
         }
 
+    def _catalog_membership(self, catalog_id: int):
+        via_offers = select(Offer.supplier_product_id).where(Offer.catalog_id == catalog_id)
+        return or_(
+            SupplierProduct.introduced_by_catalog_id == catalog_id,
+            SupplierProduct.id.in_(via_offers),
+        )
+
+    def _catalog_mappings_filter(
+        self,
+        stmt,
+        *,
+        q: str,
+        mapping: str,
+        price: str,
+        supplier: str | None,
+    ):
+        """Applique les filtres mapping sur une requête déjà jointe à Supplier."""
+        if mapping == "mapped":
+            stmt = stmt.where(SupplierProduct.product_id.is_not(None))
+        elif mapping == "unmapped":
+            stmt = stmt.where(SupplierProduct.product_id.is_(None))
+        if supplier:
+            stmt = stmt.where(Supplier.name == supplier)
+        if q:
+            stmt = stmt.where(
+                or_(
+                    SupplierProduct.designation.icontains(q, autoescape=True),
+                    SupplierProduct.supplier_reference.icontains(q, autoescape=True),
+                    SupplierProduct.brand.icontains(q, autoescape=True),
+                    SupplierProduct.ean.icontains(q, autoescape=True),
+                    Supplier.name.icontains(q, autoescape=True),
+                )
+            )
+        has_offer = exists(
+            select(Offer.id).where(Offer.supplier_product_id == SupplierProduct.id)
+        )
+        if price == "with_price":
+            stmt = stmt.where(has_offer)
+        elif price == "without_price":
+            stmt = stmt.where(~has_offer)
+        return stmt
+
     def set_supplier_product_mapping(
-        self, supplier_product_id: int, product_id: int | None
+        self,
+        supplier_product_id: int,
+        product_id: int | None,
+        *,
+        confirm_remap: bool = False,
     ) -> dict:
-        """Association explicite uniquement — jamais de mapping automatique."""
+        """Association explicite uniquement — jamais de mapping automatique.
+
+        Une référence déjà rattachée à un autre Product n'est pas déplacée
+        sans confirm_remap.
+        """
         sp = self.session.get(SupplierProduct, supplier_product_id)
         if sp is None:
             raise LookupError("Référence fournisseur introuvable.")
+        if (
+            product_id is not None
+            and sp.product_id is not None
+            and sp.product_id != product_id
+            and not confirm_remap
+        ):
+            current = self.session.get(Product, sp.product_id)
+            code = current.code if current else str(sp.product_id)
+            name = current.name if current else ""
+            raise PermissionError(
+                f"Déjà rattaché à {code}" + (f" — {name}" if name else "") + ". Confirmez le déplacement."
+            )
         if product_id is not None:
             product = self.session.get(Product, product_id)
             if product is None:
@@ -628,6 +849,15 @@ class SupplierImportService:
             latest[offer.supplier_product_id] = offer
         return latest
 
+
+    def set_supplier_active(self, supplier_id: int, active: bool) -> dict:
+        """Participation au comparateur. Ne touche aucune autre table."""
+        supplier = self.session.get(Supplier, supplier_id)
+        if supplier is None:
+            raise LookupError("Fournisseur introuvable.")
+        supplier.active = active
+        self.session.commit()
+        return {"id": supplier.id, "name": supplier.name, "active": bool(supplier.active)}
 
     def set_catalog_active(self, catalog_id: int, active: bool) -> dict:
         catalog = self.session.get(SupplierImport, catalog_id)

@@ -17,10 +17,12 @@ from app.routes.api import router
 from app.routes.admin_catalogue import router as admin_catalogue_router
 from app.routes.chantiers import router as chantiers_router
 from app.schema_ensure import ensure_schema
+from app.services.admin_catalogue import AdminCatalogueService
 from app.services.chantiers import ChantierNotFound, ChantierService
 from app.services.geocoding import FakeGeocodingService
 from app.services.shopping_list import ShoppingListService
 from app.services.supplier_import import SupplierImportService
+from app.services.units import ALLOWED_PRODUCT_UNITS
 from app.version import APP_VERSION
 from scripts.seed import seed
 
@@ -29,8 +31,18 @@ ROOT = Path(__file__).parent
 
 
 def _static_asset(path: str) -> str:
-    """URL locale versionnée (?v=APP_VERSION) pour invalider le cache navigateur à chaque release."""
-    return f"/static/{path.lstrip('/')}?v={APP_VERSION}"
+    """URL locale versionnée pour invalider le cache navigateur.
+
+    Utilise mtime du fichier (en plus d'APP_VERSION) pour que les corrections
+    JS/CSS soient prises en compte sans bump de version applicative.
+    """
+    rel = path.lstrip("/")
+    stamp = APP_VERSION
+    try:
+        stamp = f"{APP_VERSION}.{int((ROOT / 'static' / rel).stat().st_mtime)}"
+    except OSError:
+        pass
+    return f"/static/{rel}?v={stamp}"
 
 
 def _format_money(value) -> str:
@@ -39,6 +51,10 @@ def _format_money(value) -> str:
     quantized = Decimal(str(value)).quantize(Decimal("0.01"))
     raw = f"{quantized:,.2f}"
     return raw.replace(",", "\u202f").replace(".", ",") + "\u00a0€"
+
+
+def _format_int(value) -> str:
+    return f"{int(value):,}".replace(",", "\u202f")
 
 
 def _format_qty(value) -> str:
@@ -98,6 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=ROOT / "templates")
     templates.env.globals["static_asset"] = _static_asset
     templates.env.filters["money"] = _format_money
+    templates.env.filters["int_fr"] = _format_int
     templates.env.filters["qty"] = _format_qty
     templates.env.filters["datetime_short"] = _format_datetime_short
 
@@ -177,6 +194,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/admin/catalogue", include_in_schema=False)
     def admin_catalogue(request: Request):
         """Back-office catalogue Product ProMatConnect — non authentifié (à protéger)."""
+        with request.app.state.session_factory() as session:
+            catalogue_suppliers = AdminCatalogueService(session).list_active_suppliers()
         return templates.TemplateResponse(
             request=request,
             name="admin_catalogue.html",
@@ -184,6 +203,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "nav_active": "admin-catalogue",
                 "admin_section": "catalogue",
                 "app_version": APP_VERSION,
+                "allowed_units": list(ALLOWED_PRODUCT_UNITS),
+                "catalogue_suppliers": catalogue_suppliers,
                 "security_note": (
                     "Page technique sans authentification — à protéger avant toute mise en production."
                 ),
@@ -192,6 +213,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/admin/catalogue/{product_id}", include_in_schema=False)
     def admin_catalogue_product_page(request: Request, product_id: int):
+        with request.app.state.session_factory() as session:
+            catalogue_suppliers = AdminCatalogueService(session).list_active_suppliers()
         return templates.TemplateResponse(
             request=request,
             name="admin_catalogue.html",
@@ -200,6 +223,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "admin_section": "catalogue",
                 "product_id": product_id,
                 "app_version": APP_VERSION,
+                "allowed_units": list(ALLOWED_PRODUCT_UNITS),
+                "catalogue_suppliers": catalogue_suppliers,
                 "security_note": (
                     "Page technique sans authentification — à protéger avant toute mise en production."
                 ),

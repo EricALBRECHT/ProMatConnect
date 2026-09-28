@@ -24,6 +24,9 @@
 
   <div id="catalogue-list-view">
     <section class="admin-section">
+      <div class="catalogue-create-bar">
+        <button type="button" class="button" id="create-product-btn">+ Créer un produit PMC</button>
+      </div>
       <div class="catalogue-toolbar">
         <label class="catalogue-search">
           <span class="sr-only">Rechercher</span>
@@ -54,6 +57,15 @@
             <option value="active" selected>Actifs</option>
             <option value="all">Tous</option>
             <option value="inactive">Inactifs</option>
+          </select>
+        </label>
+        <label>
+          Fournisseur
+          <select id="catalogue-supplier" aria-label="Fournisseur">
+            <option value="" selected>Tous</option>
+            {% for supplier in catalogue_suppliers|default([]) %}
+            <option value="{{ supplier.id }}">{{ supplier.name }}</option>
+            {% endfor %}
           </select>
         </label>
         <label>
@@ -136,6 +148,42 @@
       <nav class="catalogue-pagination" id="unmapped-pagination" aria-label="Pagination références non rattachées"></nav>
     </section>
   </div>
+
+  <dialog class="map-edit-dialog" id="create-product-dialog">
+    <form class="catalogue-edit-form" id="create-product-form">
+      <h3>Créer un produit PMC</h3>
+      <p class="muted">Le produit est disponible tout de suite dans la recherche matériau, les chantiers et le comparateur.</p>
+      <label>Nom *
+        <input name="name" required maxlength="200" />
+      </label>
+      <label>Catégorie *
+        <input name="category" required maxlength="80" list="create-category-list" placeholder="Catégorie existante ou nouvelle" />
+        <datalist id="create-category-list"></datalist>
+      </label>
+      <label>Unité *
+        <select name="reference_unit" required>
+          {% for unit in allowed_units %}
+          <option value="{{ unit }}">{{ unit }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Code PMC
+        <input name="code" maxlength="64" placeholder="Vide = PMC-MAN- généré. Ex. PMC-BA13-STD-2600X1200" autocapitalize="characters" />
+      </label>
+      <label>Description
+        <textarea name="description" maxlength="500" rows="2"></textarea>
+      </label>
+      <fieldset class="catalogue-attrs-edit">
+        <legend>Caractéristiques</legend>
+        <div class="catalogue-attr-fields" id="create-attr-fields"></div>
+      </fieldset>
+      <div class="map-create-actions">
+        <button type="submit" class="button">Créer</button>
+        <button type="button" class="button secondary" id="create-product-cancel">Annuler</button>
+      </div>
+      <p class="error" data-create-error hidden></p>
+    </form>
+  </dialog>
 
   <div id="catalogue-detail-view" hidden>
     <p><a href="/admin/catalogue" class="button secondary" id="catalogue-back">← Retour liste</a></p>

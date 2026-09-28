@@ -188,9 +188,22 @@ def _offer_dto(row: SupplierOfferCache, *, now: datetime) -> CachedLiveOffer:
     )
 
 
+def _negative_without_price(entry: CachedLiveOffer) -> bool:
+    """Indisponibilité explicite mémorisée sans prix : réponse complète, pas un trou."""
+    if entry.price_ht is not None or entry.price_ttc is not None:
+        return False
+    return (
+        entry.stock_quantity == 0
+        or entry.is_salable is False
+        or entry.is_offer_available is False
+    )
+
+
 def _classify_offer(entry: CachedLiveOffer | None) -> SkuFreshness:
     if entry is None or not entry.has_any_data:
         return SkuFreshness.MISSING
+    if _negative_without_price(entry) and entry.stock_fresh:
+        return SkuFreshness.FRESH
     if entry.price_fresh and entry.stock_fresh:
         return SkuFreshness.FRESH
     if entry.price_fresh and not entry.stock_fresh:

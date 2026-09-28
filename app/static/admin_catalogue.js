@@ -25,6 +25,7 @@
   const meta = document.getElementById("catalogue-meta");
   const pagination = document.getElementById("catalogue-pagination");
   const categorySelect = document.getElementById("catalogue-category");
+  const supplierSelect = document.getElementById("catalogue-supplier");
 
   let state = {
     page: 1,
@@ -33,6 +34,7 @@
     category: "",
     legacy: "exclude",
     active: "active",
+    supplier: "",
     mapping: "all",
     anomaly: "all",
     has_price: "all",
@@ -93,6 +95,7 @@
       category: state.category || undefined,
       legacy: state.legacy,
       active: state.active,
+      supplier: state.supplier || undefined,
       mapping: state.mapping,
       anomaly: state.anomaly,
       has_price: state.has_price,
@@ -113,6 +116,21 @@
         opt.textContent = c;
         categorySelect.appendChild(opt);
       });
+    }
+    if (supplierSelect) {
+      const previous = state.supplier || supplierSelect.value || "";
+      while (supplierSelect.options.length > 1) {
+        supplierSelect.remove(1);
+      }
+      (data.suppliers || []).forEach((s) => {
+        const opt = document.createElement("option");
+        opt.value = String(s.id);
+        opt.textContent = s.name;
+        supplierSelect.appendChild(opt);
+      });
+      const stillValid = [...supplierSelect.options].some((o) => o.value === previous);
+      supplierSelect.value = stillValid ? previous : "";
+      state.supplier = supplierSelect.value;
     }
     meta.textContent = `${data.total} produit(s) · page ${data.page}/${data.pages} · non rattachées : ${data.unmapped_count} · anomalies (filtre) : ${data.anomaly_product_count} · legacy DB : ${data.legacy_count}`;
     tbody.innerHTML = (data.items || [])
@@ -324,7 +342,7 @@
       <section class="admin-section catalogue-detail-head">
         <div class="catalogue-detail-media">${thumb(p.image_url, p.name)}</div>
         <div>
-          <p class="muted">${esc(p.code)}${p.is_legacy ? " · Legacy" : ""}${p.is_active ? "" : " · Inactif"}</p>
+          <p class="muted">${esc(p.code)} · code stable, non modifiable${p.is_legacy ? " · Legacy" : ""}${p.is_active ? "" : " · Inactif"}</p>
           <h2>${esc(p.name)}</h2>
           <p>${esc(p.category)}${p.subcategory ? ` · ${esc(p.subcategory)}` : ""} · unité besoin <strong>${esc(p.reference_unit)}</strong></p>
           <p>Min ${money(p.min_price_ht)} HT · ${money(p.min_price_ttc)} TTC · ${esc(p.offer_count)} offre(s) · ${esc(p.anomaly_count)} anomalie(s)</p>
@@ -370,7 +388,7 @@
       <section class="admin-section">
         <div class="catalogue-refs-head">
           <h3>Références fournisseurs (${esc((p.supplier_products || []).length)})</h3>
-          <button type="button" class="button" id="attach-ref-btn">+ Rattacher une référence fournisseur</button>
+          <button type="button" class="button" id="attach-ref-btn">Associer des références fournisseur</button>
         </div>
         ${
           conditioningSavedFlash
@@ -382,8 +400,8 @@
 
       <dialog class="map-edit-dialog catalogue-attach-dialog" id="catalogue-attach-dialog">
         <form method="dialog" class="map-edit-form" id="catalogue-attach-form">
-          <h3>Rattacher une référence fournisseur</h3>
-          <p class="muted">Produit cible : <strong>${esc(p.code)}</strong> — ${esc(p.name)}</p>
+          <h3>Associer des références fournisseur</h3>
+          <p class="muted">Produit cible : <strong>${esc(p.code)}</strong> — ${esc(p.name)}. Une référence déjà rattachée n'est pas déplacée sans confirmation.</p>
           <label>Rechercher une référence fournisseur…
             <input type="search" name="q" placeholder="Fournisseur, référence, désignation, marque, EAN…" maxlength="100" />
           </label>
@@ -443,15 +461,22 @@
     `;
   }
 
-  async function putMapping(spId, productId) {
+  async function putMapping(spId, productId, confirmRemap = false) {
     const res = await fetch(`/api/supplier-products/${spId}/mapping`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ product_id: productId }),
+      body: JSON.stringify({ product_id: productId, confirm_remap: confirmRemap }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(typeof body.detail === "string" ? body.detail : "Rattachement impossible.");
+      const detail = body.detail;
+      const message =
+        typeof detail === "string"
+          ? detail
+          : detail && typeof detail.message === "string"
+            ? detail.message
+            : "Rattachement impossible.";
+      throw new Error(message);
     }
     return body;
   }
@@ -517,9 +542,9 @@
     const attachResults = attachForm?.querySelector("[data-attach-results]");
     let attachTimer = null;
 
-    async function searchUnmapped(q) {
-      const qs = queryString({ q, page: 1, page_size: 20 });
-      const res = await fetch(`/api/admin/catalogue/unmapped?${qs}`);
+    async function searchReferences(q) {
+      const qs = queryString({ q, limit: 20 });
+      const res = await fetch(`/api/admin/catalogue/references?${qs}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         attachResults.innerHTML = `<p class="error">${esc(data.detail || "Erreur")}</p>`;
@@ -527,41 +552,60 @@
       }
       const items = data.items || [];
       if (!items.length) {
-        attachResults.innerHTML = '<p class="muted">Aucune référence non rattachée trouvée.</p>';
+        attachResults.innerHTML = q
+          ? '<p class="muted">Aucune référence trouvée.</p>'
+          : '<p class="muted">Aucune référence non rattachée. Saisissez une recherche pour inclure les références déjà associées.</p>';
         return;
       }
       attachResults.innerHTML = items
         .map((item) => {
-          const price =
-            item.price != null
-              ? `${money(item.price)} ${esc(item.tax_basis || "")}${
-                  item.price_ht != null && item.tax_basis === "TTC"
-                    ? ` · ${money(item.price_ht)} HT`
-                    : ""
-                }`
-              : "Sans prix";
+          const current =
+            item.current_product_id != null
+              ? `<div class="muted">Déjà rattachée à <strong>${esc(item.current_product_code)}</strong> — ${esc(item.current_product_name)}</div>`
+              : '<div class="muted">Non rattachée</div>';
+          const same = item.current_product_id === product.id;
+          const action = same
+            ? '<span class="muted">Déjà sur ce produit</span>'
+            : `<button type="button" class="button button-compact attach-confirm"
+              data-sp-id="${esc(item.supplier_product_id)}"
+              data-supplier="${esc(item.supplier)}"
+              data-ref="${esc(item.supplier_reference)}"
+              data-current-id="${esc(item.current_product_id ?? "")}"
+              data-current-code="${esc(item.current_product_code || "")}"
+              data-current-name="${esc(item.current_product_name || "")}">${
+                item.current_product_id != null ? "Déplacer" : "Associer"
+              }</button>`;
           return `<article class="catalogue-attach-item">
             <div>
               <strong>${esc(item.supplier)}</strong> · <code>${esc(item.supplier_reference)}</code>
               <div>${esc(item.designation)}</div>
-              <div class="muted">${item.brand ? esc(item.brand) + " · " : ""}${price}</div>
+              ${item.brand ? `<div class="muted">${esc(item.brand)}</div>` : ""}
+              ${current}
             </div>
-            <button type="button" class="button button-compact attach-confirm"
-              data-sp-id="${esc(item.supplier_product_id)}"
-              data-supplier="${esc(item.supplier)}"
-              data-ref="${esc(item.supplier_reference)}">Rattacher</button>
+            ${action}
           </article>`;
         })
         .join("");
       attachResults.querySelectorAll(".attach-confirm").forEach((btn) => {
         btn.addEventListener("click", async () => {
           const spId = Number(btn.dataset.spId);
-          const ok = window.confirm(
-            `Rattacher la référence ${btn.dataset.supplier} ${btn.dataset.ref}\nà ${product.name} ?`
-          );
-          if (!ok) return;
+          const currentId = btn.dataset.currentId;
+          let confirmRemap = false;
+          if (currentId) {
+            const ok = window.confirm(
+              `La référence ${btn.dataset.supplier} ${btn.dataset.ref} est déjà rattachée à ${btn.dataset.currentCode} — ${btn.dataset.currentName}.\n` +
+                `La déplacer vers ${product.code} — ${product.name} ?`
+            );
+            if (!ok) return;
+            confirmRemap = true;
+          } else {
+            const ok = window.confirm(
+              `Associer la référence ${btn.dataset.supplier} ${btn.dataset.ref}\nà ${product.code} — ${product.name} ?`
+            );
+            if (!ok) return;
+          }
           try {
-            await putMapping(spId, product.id);
+            await putMapping(spId, product.id, confirmRemap);
             attachDialog.close();
             openDetail(product.id, false);
           } catch (e) {
@@ -575,14 +619,14 @@
 
     detailBox.querySelector("#attach-ref-btn")?.addEventListener("click", () => {
       attachForm.q.value = "";
-      attachResults.innerHTML = '<p class="muted">Saisissez une recherche pour lister les références non rattachées.</p>';
+      attachResults.innerHTML = '<p class="muted">Saisissez une recherche, ou laissez vide pour les références non rattachées.</p>';
       attachForm.querySelector("[data-attach-error]").hidden = true;
       attachDialog.showModal();
-      searchUnmapped("");
+      searchReferences("");
     });
     attachForm?.q?.addEventListener("input", () => {
       clearTimeout(attachTimer);
-      attachTimer = setTimeout(() => searchUnmapped(attachForm.q.value.trim()), 250);
+      attachTimer = setTimeout(() => searchReferences(attachForm.q.value.trim()), 250);
     });
     attachForm?.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -649,7 +693,7 @@
           );
           if (!ok) return;
           try {
-            await putMapping(retargetSp.supplier_product_id, targetId);
+            await putMapping(retargetSp.supplier_product_id, targetId, true);
             retargetDialog.close();
             openDetail(product.id, false);
           } catch (e) {
@@ -822,6 +866,71 @@
     loadUnmapped();
   }
 
+  const createDialog = document.getElementById("create-product-dialog");
+  const createForm = document.getElementById("create-product-form");
+  const createAttrs = document.getElementById("create-attr-fields");
+  if (createAttrs) {
+    createAttrs.innerHTML = Object.entries(ATTR_LABELS)
+      .map(
+        ([key, label]) =>
+          `<label>${esc(label)}<input data-attr-key="${esc(key)}" /></label>`
+      )
+      .join("");
+  }
+  document.getElementById("create-product-btn")?.addEventListener("click", () => {
+    const list = document.getElementById("create-category-list");
+    if (list && categorySelect) {
+      list.innerHTML = [...categorySelect.options]
+        .filter((opt) => opt.value)
+        .map((opt) => `<option value="${esc(opt.value)}"></option>`)
+        .join("");
+    }
+    const err = createForm?.querySelector("[data-create-error]");
+    if (err) err.hidden = true;
+    createDialog?.showModal();
+  });
+  document.getElementById("create-product-cancel")?.addEventListener("click", () => {
+    createDialog?.close();
+  });
+  createForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const err = createForm.querySelector("[data-create-error]");
+    err.hidden = true;
+    const fd = new FormData(createForm);
+    let attributes;
+    try {
+      attributes = collectAttributes(createForm);
+    } catch {
+      err.textContent = "Caractéristiques invalides.";
+      err.hidden = false;
+      return;
+    }
+    const payload = {
+      name: String(fd.get("name") || "").trim(),
+      category: String(fd.get("category") || "").trim(),
+      reference_unit: String(fd.get("reference_unit") || "").trim(),
+      code: String(fd.get("code") || "").trim() || null,
+      description: String(fd.get("description") || "").trim() || null,
+      attributes,
+    };
+    const res = await fetch("/api/admin/catalogue/products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = body.detail;
+      err.textContent =
+        typeof detail === "string" ? detail : detail?.message || "Création impossible.";
+      err.hidden = false;
+      return;
+    }
+    createForm.reset();
+    createDialog.close();
+    openDetail(body.id);
+  });
+
   root.addEventListener("click", (event) => {
     const row = event.target.closest?.("[data-id].catalogue-row, [data-id].catalogue-card");
     if (row && !event.target.closest("a,button,input,select")) {
@@ -856,6 +965,9 @@
   });
   document.getElementById("catalogue-category")?.addEventListener("change", (e) => {
     state.category = e.target.value; state.page = 1; loadList();
+  });
+  document.getElementById("catalogue-supplier")?.addEventListener("change", (e) => {
+    state.supplier = e.target.value; state.page = 1; loadList();
   });
 
   document.getElementById("catalogue-q")?.addEventListener("input", (event) => {

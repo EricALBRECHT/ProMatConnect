@@ -104,16 +104,28 @@ class ConnectorOffer(BaseModel):
     preparation_minutes: int = Field(ge=0)
     updated_at: datetime
     image_url: str | None = None
+    # live = vient d'être lu chez le fournisseur ; cache = réponse locale encore valide ;
+    # stale = ancienne réponse servie après échec réseau. None = offre non live.
+    live_status: str | None = None
+    fetched_at: datetime | None = None
+    # Gedimat : available | delayed | order_only | unavailable.
+    # None = la décision reste celle du stock (Brico et catalogues historiques).
+    fulfillment: str | None = None
 
     @computed_field
     @property
     def available_quantity(self) -> Decimal:
+        # Gedimat « disponible » n'est pas la règle Brico stock > 0.
+        if self.fulfillment == "available" and self.stock <= 0:
+            return Decimal("1000000")
         # Catalogue national / prix sans stock magasin : stock 0 ≠ rupture.
         if self.stock <= 0 and not self.agency.is_geolocated:
             return Decimal("1000000")
         return self.reference_quantity * self.stock
 
     def covers_packs(self, packs: int) -> bool:
+        if self.fulfillment == "available" and self.stock <= 0:
+            return True
         if self.stock <= 0 and not self.agency.is_geolocated:
             return True
         return self.stock >= packs

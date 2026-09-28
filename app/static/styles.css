@@ -2126,6 +2126,57 @@ select {
   align-items: center;
 }
 
+.map-pagination {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.map-page-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+}
+
+.map-page-sizes,
+.map-page-nav,
+.map-page-numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.map-filtered-total {
+  font-size: 0.95rem;
+}
+
+.map-page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.map-page-size select {
+  font: inherit;
+  padding: 0.2rem 0.35rem;
+}
+
+.map-page-ellipsis {
+  padding: 0 0.15rem;
+}
+
+.map-select-page {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  margin-right: 0.75rem;
+}
+
 .map-filter-search {
   min-width: min(100%, 16rem);
   flex: 1 1 16rem;
@@ -2599,6 +2650,9 @@ select {
 }
 .admin-subnav-link.is-active {
   border-bottom: 2px solid #1a1a1a;
+}
+.catalogue-create-bar {
+  margin: 0 0 12px;
 }
 .catalogue-toolbar {
   display: grid;

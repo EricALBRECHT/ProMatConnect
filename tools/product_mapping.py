@@ -337,6 +337,7 @@ CATALOG_BATCH_CONSOLIDATE_COMMAND = "catalog-batch-consolidate"
 FASTENER_BATCH_COMMAND = "fastener-batch"
 PROFILES_BATCH_COMMAND = "profiles-batch"
 MASS_BATCH_COMMAND = "mass-batch"
+PASS2_COMMAND = "pass2"
 
 FASTENER_BATCH_CATEGORIES = (
     CATEGORY_VIS_BOIS,
@@ -760,6 +761,23 @@ def main_mass_batch(argv: list[str]) -> int:
     return 0
 
 
+def main_pass2(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(
+        prog=f"product_mapping.py {PASS2_COMMAND}",
+        description="Passe 2 BRICO_DEPOT — familles déterministes (seed + apply exact).",
+    )
+    p.add_argument("--no-apply", action="store_true")
+    args = p.parse_args(argv)
+    settings = Settings()
+    engine = make_engine(settings.database_url)
+    from app.services.product_mapping.mass_pass2 import run_pass2
+
+    with Session(engine) as session:
+        report = run_pass2(session, apply=not args.no_apply)
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
 def _print_apply(result) -> None:
     d = result.to_dict()
     print("=== Apply EXACT PLAQUE_PLATRE ===")
@@ -784,6 +802,8 @@ def main(argv: list[str] | None = None) -> int:
         return main_profiles_batch(raw[1:])
     if raw and raw[0] == MASS_BATCH_COMMAND:
         return main_mass_batch(raw[1:])
+    if raw and raw[0] == PASS2_COMMAND:
+        return main_pass2(raw[1:])
 
     args = parse_args(argv)
     if args.apply_exact and args.category != CATEGORY_PLAQUE_PLATRE:

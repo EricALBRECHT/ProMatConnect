@@ -73,6 +73,12 @@ class SelectedLine(BaseModel):
     vat_rate: Decimal | None = None
     # Identité métier globale de l'agence (optionnel = snapshots anciens).
     agency_key: str | None = None
+    # Origine de la donnée live : live | cache | stale. Absent = offre catalogue.
+    live_status: str | None = None
+    fetched_at: datetime | None = None
+    # available = stock suffisant ; partial = stock > 0 mais insuffisant.
+    availability: str = "available"
+    missing_quantity: Decimal | None = None
 
 
 class UnavailableLine(BaseModel):
@@ -80,6 +86,8 @@ class UnavailableLine(BaseModel):
     product_name: str
     quantity: Decimal
     reason: str = "Aucune offre active avec un stock suffisant dans une même agence."
+    # out_of_stock = offre trouvée, stock 0 ou non vendable ; unavailable = aucune offre.
+    availability: str = "unavailable"
 
 
 class ComparisonOption(BaseModel):
@@ -94,6 +102,11 @@ class ComparisonOption(BaseModel):
     agency_count: int
     max_preparation_minutes: int
     agencies: list[AgencyResult]
+    lines_requested: int = 0
+    lines_available: int = 0
+    lines_partial: int = 0
+    lines_unavailable: int = 0
+    coverage_rate: Decimal = Decimal("0")
 
 
 class ProcurementStrategy(BaseModel):
@@ -113,6 +126,12 @@ class ProcurementStrategy(BaseModel):
     lines: list[SelectedLine] = Field(default_factory=list)
     unavailable: list[UnavailableLine] = Field(default_factory=list)
     cost_breakdown: CostBreakdown | None = None
+    available_subtotal: Decimal | None = None
+    lines_requested: int = 0
+    lines_available: int = 0
+    lines_partial: int = 0
+    lines_unavailable: int = 0
+    coverage_rate: Decimal = Decimal("0")
 
 
 class StrategyDelta(BaseModel):

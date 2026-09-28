@@ -48,6 +48,20 @@ class ProcurementOptimizer:
         option_factory: OptionFactory,
     ) -> tuple[list[ProcurementStrategy], StrategyDelta | None]:
         quantities = {line.product_id: line.quantity for line in lines}
+        effort = option_factory(offers)
+        basket = dict(
+            lines=list(effort.available),
+            unavailable=list(effort.unavailable),
+            available_subtotal=effort.available_subtotal,
+            stops=list(effort.agencies),
+            supplier_count=effort.supplier_count,
+            max_preparation_minutes=effort.max_preparation_minutes,
+            lines_requested=effort.lines_requested,
+            lines_available=effort.lines_available,
+            lines_partial=effort.lines_partial,
+            lines_unavailable=effort.lines_unavailable,
+            coverage_rate=effort.coverage_rate,
+        )
         eligible = [
             offer
             for offer in offers
@@ -86,8 +100,11 @@ class ProcurementOptimizer:
                 key="minimum_materials",
                 title="Prix matériaux minimum",
                 valid=False,
-                explanation="Panier incomplet : quantités indisponibles.",
-                unavailable=global_option.unavailable,
+                explanation=(
+                    f"{effort.lines_available}/{effort.lines_requested} références disponibles. "
+                    "Le total ne couvre que les lignes achetables."
+                ),
+                **basket,
             )
 
         geo_option = option_factory(geo_eligible)
@@ -97,21 +114,29 @@ class ProcurementOptimizer:
                 "Le prix matériaux reste comparable via le catalogue national "
                 "lorsqu'il est disponible."
                 if global_option.valid
-                else "Panier incomplet : quantités indisponibles."
+                else (
+                    f"{effort.lines_available}/{effort.lines_requested} références disponibles. "
+                    "Le total ne couvre que les lignes achetables."
+                )
+            )
+            shown = (
+                basket
+                if not effort.valid
+                else {"unavailable": geo_option.unavailable or global_option.unavailable}
             )
             single = ProcurementStrategy(
                 key="single_stop",
                 title="1 seul arrêt",
                 valid=False,
                 explanation=no_geo_msg,
-                unavailable=geo_option.unavailable or global_option.unavailable,
+                **shown,
             )
             compromise = ProcurementStrategy(
                 key="best_compromise",
                 title="Meilleur compromis",
                 valid=False,
                 explanation=no_geo_msg,
-                unavailable=geo_option.unavailable or global_option.unavailable,
+                **shown,
             )
             return [single, minimum, compromise], None
 
@@ -152,6 +177,10 @@ class ProcurementOptimizer:
                     if {o.product_id for o in subset_at_time} != set(quantities):
                         continue
                     option = option_factory(subset_at_time)
+                    # Panier incomplet (ex. delayed/order_only) → total is None :
+                    # ne pas scorer ni appeler costs.calculate(None, ...).
+                    if not option.valid or option.total is None:
+                        continue
                     signature = tuple(
                         (
                             line.product_id,

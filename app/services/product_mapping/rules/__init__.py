@@ -30,6 +30,8 @@ from app.services.product_mapping.rules.vis_placo import VIS_PLACO_RULE
 # Familles mass (DIMENSIONAL_FASTENER / BOARD_PANEL) — side-effect register_rule
 from app.services.product_mapping import mass_dimensional as _mass_dimensional  # noqa: F401
 from app.services.product_mapping import mass_panels as _mass_panels  # noqa: F401
+from app.services.product_mapping import mass_pass2 as _mass_pass2  # noqa: F401
+from app.services.product_mapping import mass_catalog as _mass_catalog  # noqa: F401
 
 __all__ = [
     "BOARD_PANEL",

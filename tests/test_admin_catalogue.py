@@ -279,7 +279,7 @@ def test_attach_detach_retarget_preserves_sp_and_offer(client, session):
     # Retarget A -> B
     moved = client.put(
         f"/api/supplier-products/{sp.id}/mapping",
-        json={"product_id": product_b.id},
+        json={"product_id": product_b.id, "confirm_remap": True},
     )
     assert moved.status_code == 200
     assert moved.json()["product_id"] == product_b.id

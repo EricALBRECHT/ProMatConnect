@@ -203,6 +203,23 @@ BOULON_RULE = _register_fastener(
     max_length_mm=400,
 )
 
+VIS_METAUX_RULE = _register_fastener(
+    code="VIS_METAUX",
+    type_value="metaux",
+    label="Vis métaux",
+    subcategory="Vis métaux",
+    pmc_prefix="PMC-VIS-METAUX-",
+    include=r"\bvis\b.*(?:metaux|mecanique)|(?:metaux|mecanique).*\bvis\b",
+    exclude=(
+        _COMMON_EXCLUDE
+        + r"|cheville|terrasse|\btole\b|\bagglo\b|\bplaco\b|\bbois\b|\bbeton\b|"
+        r"tirefond|boulon|goujon|charniere|bardage|\bcadre\b|multi|ecrou"
+    ),
+    designation_ilike=("métaux", "metaux", "mécanique", "mecanique"),
+    max_diameter_mm="12",
+    max_length_mm=200,
+)
+
 GOUJON_RULE = _register_fastener(
     code="GOUJON",
     type_value="goujon",
@@ -224,6 +241,7 @@ MASS_DIMENSIONAL_RULES = (
     TIREFOND_RULE,
     BOULON_RULE,
     GOUJON_RULE,
+    VIS_METAUX_RULE,
 )
 
 MASS_DIMENSIONAL_CODES = tuple(r.code for r in MASS_DIMENSIONAL_RULES)
@@ -276,6 +294,13 @@ MASS_DIMENSIONAL_META = {
         "subcategory": "Goujons",
         "type": "goujon",
         "label": "Goujon d'ancrage",
+        "category": "Fixation",
+    },
+    "VIS_METAUX": {
+        "prefix": "PMC-VIS-METAUX-",
+        "subcategory": "Vis métaux",
+        "type": "metaux",
+        "label": "Vis métaux",
         "category": "Fixation",
     },
 }

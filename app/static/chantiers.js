@@ -541,6 +541,22 @@ async function setupDetail(chantierId) {
       item.append(details);
       linesBlock.append(item);
     });
+    (strategy.unavailable || []).forEach((line) => {
+      const item = node("div", undefined, "appro-line");
+      item.append(node("strong", `✕ ${line.product_name}`));
+      const details = node("div", undefined, "appro-line-details muted");
+      details.append(
+        node(
+          "p",
+          line.availability === "out_of_stock"
+            ? "Indisponible dans ce dépôt — besoin non satisfait"
+            : `${line.reason || "Aucune offre"} — besoin non satisfait`,
+        ),
+        node("p", `Besoin : ${number(line.quantity)} · non acheté`),
+      );
+      item.append(details);
+      linesBlock.append(item);
+    });
     const shoppingLink = node("a", "Voir la liste d’achat", "button primary shopping-list-link");
     shoppingLink.href = `/chantiers/${chantierId}/liste-achat`;
     content.replaceChildren(summary, linesBlock, shoppingLink);

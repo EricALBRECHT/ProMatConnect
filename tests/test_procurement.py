@@ -125,6 +125,16 @@ def test_unavailable_is_never_scored_as_a_complete_basket():
     assert all(s.unavailable[0].product_id == 1 for s in data.strategies)
 
 
+def test_delayed_fulfillment_does_not_crash_cost_scoring():
+    """Offre delayed couvre le product_id mais option.total is None → pas de TypeError."""
+    delayed = offer(stock=10, minutes=0).model_copy(update={"fulfillment": "delayed"})
+    data = compare([delayed], {1: "1"})
+    assert data.options
+    assert all(s.estimated_procurement_cost is None or s.valid for s in data.strategies)
+    # Le panier n'est pas « complet » stock magasin, mais l'API reste exploitable.
+    assert any(not s.valid for s in data.strategies)
+
+
 def test_route_and_allocation_stop_order_agree():
     data = compare([offer(), offer(product_id=2, agency_id=2, latitude=48.9)], {1: "1", 2: "1"})
     result = data.strategies[1]

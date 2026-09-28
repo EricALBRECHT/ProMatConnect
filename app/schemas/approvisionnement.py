@@ -25,7 +25,7 @@ class ApprovisionnementWrite(BaseModel):
     def strategy_must_be_valid_choice(cls, value: ProcurementStrategy) -> ProcurementStrategy:
         if value.key not in STRATEGY_KEYS:
             raise ValueError("Stratégie inconnue.")
-        if not value.valid:
+        if not value.valid and not value.lines and not value.unavailable:
             raise ValueError("Seule une solution valide peut être retenue.")
         return value
 

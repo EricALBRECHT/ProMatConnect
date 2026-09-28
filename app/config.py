@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     supplier_store_cache_ttl_s: int = Field(default=7 * 24 * 3600, ge=60, le=90 * 24 * 3600)
     supplier_offer_price_ttl_s: int = Field(default=60 * 60, ge=30, le=24 * 3600)
     supplier_offer_stock_ttl_s: int = Field(default=10 * 60, ge=30, le=24 * 3600)
+    # Réponse live Brico (prix + stock + indisponibilité) : une seule durée.
+    brico_live_cache_ttl_seconds: int = Field(default=1800, ge=30, le=24 * 3600)
+    # Gedimat LIVE. Sans coordonnées d'origine, repli sur gedimat_store_id s'il est défini.
+    # store_id n'a pas de défaut : 2069 n'est pas une valeur universelle.
+    gedimat_live_enabled: bool = Field(default=True)
+    gedimat_store_id: int | None = Field(default=None, ge=1)
+    gedimat_nearest_store_limit: int = Field(default=5, ge=1, le=8)
+    gedimat_live_cache_ttl_seconds: int = Field(default=1800, ge=30, le=24 * 3600)
     supplier_cache_refresh_lease_s: int = Field(default=30, ge=5, le=300)
 
     # Brico Dépôt LIVE (désactivé par défaut — aucun appel réseau).

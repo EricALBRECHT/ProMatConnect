@@ -20,6 +20,10 @@
 
   <section class="admin-section">
     <h2>Fournisseurs</h2>
+    <p class="muted">
+      Actif ou inactif : participation aux nouvelles comparaisons.
+      Désactiver conserve les références, les mappings, les catalogues et le cache.
+    </p>
     <ul class="admin-source-list">
       {% for source in sources %}
       <li>
@@ -28,9 +32,16 @@
           <span class="muted">· {{ source.source_type }}</span>
         </div>
         <div class="admin-source-meta">
-          <span>Statut : {{ source.status }}</span>
-          <span>{{ source.offers }} offres</span>
-          <span>Màj : {{ source.updated_at or "—" }}</span>
+          <span>Participation : {% if source.active %}Actif{% else %}Inactif{% endif %}</span>
+          <span>{{ source.references | int_fr }} références</span>
+          <span>{{ source.mapped | int_fr }} mappées</span>
+        </div>
+        <div class="admin-row-actions">
+          {% if source.active %}
+          <button type="button" class="button secondary button-compact supplier-deactivate" data-id="{{ source.id }}">Désactiver</button>
+          {% else %}
+          <button type="button" class="button secondary button-compact supplier-activate" data-id="{{ source.id }}">Activer</button>
+          {% endif %}
         </div>
       </li>
       {% else %}
@@ -41,6 +52,9 @@
 
   <section class="admin-section admin-catalogs-section">
     <h2>Catalogues / imports</h2>
+    <p class="muted">
+      Statut de la source d'import. Il ne décide pas si le fournisseur participe au comparateur.
+    </p>
     <div class="admin-table-wrap admin-catalogs-table-wrap">
       <table class="admin-table admin-catalogs-table" id="catalog-table">
         <thead>
@@ -49,7 +63,7 @@
             <th scope="col">Fournisseur</th>
             <th scope="col">Date</th>
             <th scope="col">HT/TTC</th>
-            <th scope="col">Offres</th>
+            <th scope="col">Références</th>
             <th scope="col">Non mappés</th>
             <th scope="col">Statut</th>
             <th scope="col">Actions</th>
@@ -65,9 +79,9 @@
             <td class="admin-catalog-suppliers" title="{{ cat.supplier_name or '' }}">{{ cat.supplier_name or "—" }}</td>
             <td class="admin-catalog-date"{% if cat.created_at %} title="{{ cat.created_at }}"{% endif %}>{{ cat.created_at | datetime_short }}</td>
             <td>{{ cat.tax_basis or "—" }}</td>
-            <td>{{ cat.offers }}</td>
+            <td>{{ cat.references | int_fr }}</td>
             <td>{{ cat.unmapped }}</td>
-            <td>{% if cat.active %}Actif{% else %}Inactif{% endif %}</td>
+            <td>{% if cat.active %}Import actif{% else %}Import inactif{% endif %}</td>
             <td class="admin-row-actions">
               <button type="button" class="button catalog-map" data-id="{{ cat.id }}">Mapper</button>
               {% if cat.active %}
@@ -96,7 +110,7 @@
       <article class="catalog-card" data-catalog-id="{{ cat.id }}">
         <header class="catalog-card-head">
           <strong class="catalog-card-title" title="{{ cat.filename }}">{{ cat.filename }}</strong>
-          <span class="catalog-card-status{% if not cat.active %} is-inactive{% endif %}">{% if cat.active %}Actif{% else %}Inactif{% endif %}</span>
+          <span class="catalog-card-status{% if not cat.active %} is-inactive{% endif %}">{% if cat.active %}Import actif{% else %}Import inactif{% endif %}</span>
         </header>
         <p class="catalog-card-suppliers" title="{{ cat.supplier_name or '' }}">{{ cat.supplier_name or "—" }}</p>
         <dl class="catalog-card-facts">
@@ -109,8 +123,8 @@
             <dd>{{ cat.tax_basis or "—" }}</dd>
           </div>
           <div>
-            <dt>Offres</dt>
-            <dd>{{ cat.offers }}</dd>
+            <dt>Références</dt>
+            <dd>{{ cat.references | int_fr }}</dd>
           </div>
           <div>
             <dt>Non mappés</dt>

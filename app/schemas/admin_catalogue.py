@@ -71,6 +71,13 @@ class CatalogueProductListItem(BaseModel):
     has_price: bool = False
 
 
+class CatalogueSupplierOption(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: int
+    name: str
+    active: bool = True
+
+
 class CatalogueProductListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     items: list[CatalogueProductListItem]
@@ -79,6 +86,7 @@ class CatalogueProductListResponse(BaseModel):
     page_size: int
     pages: int
     categories: list[str] = Field(default_factory=list)
+    suppliers: list[CatalogueSupplierOption] = Field(default_factory=list)
     unmapped_count: int = 0
     anomaly_product_count: int = 0
     legacy_count: int = 0
@@ -137,6 +145,36 @@ class CatalogueUnmappedResponse(BaseModel):
     page: int
     page_size: int
     pages: int
+
+
+class CatalogueProductCreate(BaseModel):
+    """Création manuelle. Code vide → PMC-MAN- généré côté serveur."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=2, max_length=200)
+    category: str = Field(min_length=1, max_length=80)
+    reference_unit: str = Field(min_length=1, max_length=30)
+    code: str | None = Field(default=None, max_length=64)
+    subcategory: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
+    attributes: dict | None = None
+
+
+class CatalogueReferenceSearchItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    supplier_product_id: int
+    supplier: str
+    supplier_reference: str
+    designation: str
+    brand: str | None = None
+    current_product_id: int | None = None
+    current_product_code: str | None = None
+    current_product_name: str | None = None
+
+
+class CatalogueReferenceSearchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[CatalogueReferenceSearchItem] = Field(default_factory=list)
 
 
 class CatalogueProductUpdate(BaseModel):
